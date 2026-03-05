@@ -1,0 +1,8 @@
+requests
+supabase
+flask
+flask-cors
+
+
+
+
