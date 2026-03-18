@@ -2,135 +2,111 @@ import os
 import requests
 from supabase import create_client, Client
 
-# --- CONFIGURACIÓN ---
-# Puedes poner estos valores directamente aquí para pruebas,
-# o usar variables de entorno para producción (más seguro)
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "TU_SUPABASE_URL_AQUI")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_KEY_AQUI")
+# --- CONFIGURACIÓN USANDO VARIABLES DE ENTORNO ---
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY")
 
-# TheSportsDB - GRATIS, sin registro, sin tarjeta
-# Liga MX ID = 4350
-BASE_URL = "https://www.thesportsdb.com/api/v1/json/123"
-LIGA_MX_ID = "4350"
-
-# Inicializar Supabase
+# Inicializar cliente de Supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-
 def obtener_perdedores_ligamx():
-    """
-    Consulta TheSportsDB y devuelve una lista de equipos
-    que perdieron en los últimos partidos de Liga MX.
-    """
-    url = f"{BASE_URL}/eventspastleague.php"
-    params = {"id": LIGA_MX_ID}
+    """Consulta la API de fútbol y devuelve nombres de equipos que perdieron recientemente."""
+    url = "https://v3.football.api-sports.io/fixtures"
+    headers = {
+        'x-rapidapi-host': "v3.football.api-sports.io",
+        'x-rapidapi-key': API_FOOTBALL_KEY
+    }
+    
+    # Parámetros para la Liga MX (ID 262)
+    # Nota: Ajustamos la temporada al año actual 2026
+    params = {
+        "league": "262",
+        "season": "2026", 
+        "last": 10  # Revisamos los últimos 10 partidos jugados
+    }
 
     try:
-        response = requests.get(url, params=params)
-        partidos = response.json().get('events', []) or []
-
+        response = requests.get(url, headers=headers, params=params)
+        partidos = response.json().get('response', [])
+        
         perdedores = []
-
         for p in partidos:
-            # Solo partidos terminados (tienen marcador numérico)
-            goles_local = p.get("intHomeScore")
-            goles_visita = p.get("intAwayScore")
-
-            if goles_local is None or goles_visita is None:
-                continue
-
-            goles_local = int(goles_local)
-            goles_visita = int(goles_visita)
-            local = p.get("strHomeTeam")
-            visita = p.get("strAwayTeam")
-
-            print(f"  Partido: {local} {goles_local} - {goles_visita} {visita}")
-
-            if goles_local < goles_visita:
-                perdedores.append(local)
-            elif goles_visita < goles_local:
-                perdedores.append(visita)
-            # Los empates no cuentan como derrota en el survivor
-
-        # Quitamos duplicados con set()
+            status = p['fixture']['status']['short']
+            if status == 'FT':  # Full Time (Partido terminado)
+                home = p['teams']['home']
+                away = p['teams']['away']
+                goles_home = p['goals']['home']
+                goles_away = p['goals']['away']
+                
+                if goles_home < goles_away:
+                    perdedores.append(home['name'])
+                elif goles_away < goles_home:
+                    perdedores.append(away['name'])
+        
         return list(set(perdedores))
-
     except Exception as e:
         print(f"Error al consultar la API: {e}")
         return []
 
+# Normalizar nombres que vienen con acento de la API
+# pero estan guardados sin acento en la base de datos
+NORMALIZAR_NOMBRES = {
+    'Mazatlán': 'Mazatlan',
+    'León': 'Leon',
+    'Querétaro': 'Queretaro',
+    'Querétaro FC': 'Queretaro FC',
+    'FC Juárez': 'FC Juarez',
+    'Atlético de San Luis': 'Atletico de San Luis',
+    'Atlético': 'Atletico',
+}
+
+def normalizar_nombre(nombre):
+    return NORMALIZAR_NOMBRES.get(nombre, nombre)
 
 def actualizar_vidas():
-    """
-    Compara los equipos perdedores con las selecciones de los usuarios
-    y les resta una vida si su equipo perdió.
-    """
-    print("=" * 50)
     print("Iniciando verificación de jornada...")
-    print("=" * 50)
-
+    
     equipos_que_perdieron = obtener_perdedores_ligamx()
-
     if not equipos_que_perdieron:
-        print("No se detectaron perdedores. ¿Ya se jugaron los partidos?")
+        print("No se detectaron perdedores nuevos.")
         return
 
-    print(f"\nEquipos que perdieron: {equipos_que_perdieron}\n")
+    print(f"Equipos que perdieron recientemente: {equipos_que_perdieron}")
 
     for nombre_equipo in equipos_que_perdieron:
-
-        # 1. Buscar el ID del equipo en nuestra tabla de Supabase
-        res_equipo = supabase.table("equipos_ligamx") \
-            .select("id") \
-            .eq("nombre", nombre_equipo) \
-            .execute()
-
-        if not res_equipo.data:
-            print(f"  Equipo '{nombre_equipo}' no encontrado en la base de datos. Revisa que el nombre coincida exactamente.")
-            continue
-
-        id_equipo = res_equipo.data[0]['id']
-
-        # 2. Buscar usuarios que eligieron este equipo con estatus 'pendiente'
-        selecciones = supabase.table("selecciones") \
-            .select("user_id") \
-            .eq("equipo_id", id_equipo) \
-            .eq("estatus", "pendiente") \
-            .execute()
-
-        if not selecciones.data:
-            print(f"  Nadie eligió a {nombre_equipo} esta jornada.")
-            continue
-
-        for sel in selecciones.data:
-            u_id = sel['user_id']
-
-            # 3. Obtener las vidas actuales del usuario
-            perfil = supabase.table("perfiles") \
-                .select("vidas") \
-                .eq("id", u_id) \
-                .single() \
-                .execute()
-
-            vidas_actuales = perfil.data['vidas']
-            nuevas_vidas = max(0, vidas_actuales - 1)  # No puede bajar de 0
-
-            # 4. Actualizar vidas en Supabase
-            supabase.table("perfiles").update({
-                "vidas": nuevas_vidas,
-                "eliminado": nuevas_vidas == 0  # True si se quedó sin vidas
-            }).eq("id", u_id).execute()
-
-            # 5. Marcar la selección como 'fallo'
-            supabase.table("selecciones").update({"estatus": "fallo"}) \
-                .eq("user_id", u_id) \
+        # 1. Buscar el ID del equipo en nuestra tabla
+        res_equipo = supabase.table("equipos_ligamx").select("id").eq("nombre", nombre_equipo).execute()
+        
+        if res_equipo.data:
+            id_equipo = res_equipo.data[0]['id']
+            
+            # 2. Buscar usuarios que eligieron a este equipo y que aún tengan estatus 'pendiente'
+            selecciones = supabase.table("selecciones") \
+                .select("user_id") \
                 .eq("equipo_id", id_equipo) \
+                .eq("estatus", "pendiente") \
                 .execute()
-
-            print(f"  Usuario {u_id} perdió una vida por {nombre_equipo}. Vidas restantes: {nuevas_vidas}")
-
-    print("\n¡Verificación completada!")
-
+            
+            for sel in selecciones.data:
+                u_id = sel['user_id']
+                
+                # 3. Restar vida al usuario
+                perfil = supabase.table("perfiles").select("vidas").eq("id", u_id).single().execute()
+                vidas_actuales = perfil.data['vidas']
+                
+                if vidas_actuales > 0:
+                    nuevas_vidas = vidas_actuales - 1
+                    supabase.table("perfiles").update({
+                        "vidas": nuevas_vidas,
+                        "eliminado": True if nuevas_vidas == 0 else False
+                    }).eq("id", u_id).execute()
+                
+                # 4. Marcar la selección como 'fallo'
+                supabase.table("selecciones").update({"estatus": "fallo"}) \
+                    .eq("user_id", u_id).eq("equipo_id", id_equipo).execute()
+                
+                print(f"Usuario {u_id} perdió una vida por culpa de {nombre_equipo}")
 
 if __name__ == "__main__":
     actualizar_vidas()
