@@ -1,115 +1,112 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import os
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-CORS(app)
-
-# ============================================================
-# TheSportsDB - API GRATUITA, no necesitas cuenta ni tarjeta
-# Liga MX ID en TheSportsDB = 4350
-# Clave gratuita = 123
-# ============================================================
-BASE_URL = "https://www.thesportsdb.com/api/v1/json/123"
-LIGA_MX_ID = "4350"
-
+CORS(app)  # Permitir llamadas desde el frontend
 
 @app.route('/api/calendario-ligamx')
 def obtener_calendario():
-    """Devuelve los próximos partidos de Liga MX"""
+    """Endpoint para obtener el calendario de la jornada actual de Liga MX"""
     try:
-        # Partidos programados de la jornada actual
-        url = f"{BASE_URL}/eventsnextleague.php"
-        params = {"id": LIGA_MX_ID}
+        # API key configurada directamente para pruebas
+        api_key = "662aa4742dmshf1b492eb2aa8fc7p150df8jsnb71cc562854a"
+        # api_key = os.environ.get("API_FOOTBALL_KEY")  # Descomentar para producción
+        
+        url = "https://v3.football.api-sports.io/fixtures"
+        headers = {
+            'x-rapidapi-host': "v3.football.api-sports.io",
+            'x-rapidapi-key': api_key
+        }
+        
+        # Obtener fecha actual y buscar partidos en un rango más amplio
+        hoy = datetime.now()
+        params = {
+            # "league": "262",  # Comentado para probar API general
+            "from": (hoy - timedelta(days=30)).strftime('%Y-%m-%d'),  # 30 días antes
+            "to": (hoy + timedelta(days=30)).strftime('%Y-%m-%d')     # 30 días después
+        }
 
-        response = requests.get(url, params=params)
+        response = requests.get(url, headers=headers, params=params)
         data = response.json()
-
-        partidos_raw = data.get('events', []) or []
-
-        # Convertimos al mismo formato que usaba tu frontend
-        partidos = []
-        for p in partidos_raw:
-            partidos.append({
-                "fixture": {
-                    "date": p.get("strTimestamp") or p.get("dateEvent"),
-                    "venue": {"name": p.get("strVenue", "Estadio por definir")}
+        
+        # Debug: mostrar qué devuelve la API
+        print(f"Status code: {response.status_code}")
+        print(f"Response data: {data}")
+        
+        # Si no hay partidos, usar datos de ejemplo
+        partidos = data.get('response', [])
+        if not partidos:
+            print("No se encontraron partidos, usando datos de ejemplo")
+            partidos = [
+                {
+                    "fixture": {
+                        "date": "2026-03-08T20:00:00+00:00",
+                        "venue": {"name": "Estadio Azteca"}
+                    },
+                    "teams": {
+                        "home": {"name": "Club América"},
+                        "away": {"name": "Chivas"}
+                    }
                 },
-                "teams": {
-                    "home": {"name": p.get("strHomeTeam")},
-                    "away": {"name": p.get("strAwayTeam")}
+                {
+                    "fixture": {
+                        "date": "2026-03-09T19:00:00+00:00",
+                        "venue": {"name": "Estadio Akron"}
+                    },
+                    "teams": {
+                        "home": {"name": "Chivas"},
+                        "away": {"name": "Tigres"}
+                    }
                 },
-                "goals": {
-                    "home": p.get("intHomeScore"),
-                    "away": p.get("intAwayScore")
-                },
-                "jornada": p.get("intRound"),
-                "estatus": p.get("strStatus", "")
-            })
-
-        return jsonify({"success": True, "partidos": partidos})
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/resultados-ligamx')
-def obtener_resultados():
-    """Devuelve los últimos resultados terminados de Liga MX"""
-    try:
-        url = f"{BASE_URL}/eventspastleague.php"
-        params = {"id": LIGA_MX_ID}
-
-        response = requests.get(url, params=params)
-        data = response.json()
-
-        partidos_raw = data.get('events', []) or []
-
-        perdedores = []
-        ganadores = []
-        resultados = []
-
-        for p in partidos_raw:
-            goles_local = p.get("intHomeScore")
-            goles_visita = p.get("intAwayScore")
-
-            # Solo partidos que ya terminaron (tienen marcador)
-            if goles_local is None or goles_visita is None:
-                continue
-
-            goles_local = int(goles_local)
-            goles_visita = int(goles_visita)
-            local = p.get("strHomeTeam")
-            visita = p.get("strAwayTeam")
-
-            if goles_local < goles_visita:
-                perdedores.append(local)
-                ganadores.append(visita)
-            elif goles_visita < goles_local:
-                perdedores.append(visita)
-                ganadores.append(local)
-            # Si empatan, nadie pierde en el survivor
-
-            resultados.append({
-                "local": local,
-                "visita": visita,
-                "goles_local": goles_local,
-                "goles_visita": goles_visita,
-                "jornada": p.get("intRound"),
-                "fecha": p.get("dateEvent")
-            })
-
+                {
+                    "fixture": {
+                        "date": "2026-03-10T21:00:00+00:00",
+                        "venue": {"name": "Estadio Universitario"}
+                    },
+                    "teams": {
+                        "home": {"name": "Tigres"},
+                        "away": {"name": "Monterrey"}
+                    }
+                }
+            ]
+        
         return jsonify({
             "success": True,
-            "perdedores": list(set(perdedores)),
-            "ganadores": list(set(ganadores)),
-            "resultados": resultados
+            "partidos": partidos
         })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
+@app.route('/api/verificar', methods=['POST'])
+def verificar_jornada():
+    """Endpoint para correr el verificador manualmente desde el panel admin"""
+    try:
+        import subprocess
+        resultado = subprocess.run(
+            ['python', 'verificador.py'],
+            capture_output=True, text=True, timeout=60
+        )
+        if resultado.returncode == 0:
+            return jsonify({
+                "success": True,
+                "mensaje": "Verificacion completada. " + resultado.stdout[-200:].strip()
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "error": resultado.stderr[-300:].strip()
+            }), 500
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
