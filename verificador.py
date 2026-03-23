@@ -18,8 +18,10 @@ NORMALIZAR_NOMBRES = {
     'Querétaro':            'Queretaro',
     'Querétaro FC':         'Queretaro FC',
     'FC Juárez':            'FC Juarez',
-    'Atlético de San Luis': 'Atletico de San Luis',
-    'Atlético':             'Atletico',
+    'Atlético de San Luis': 'Atletico San Luis',
+    'Atletico de San Luis': 'Atletico San Luis',
+    'Atlético San Luis':    'Atletico San Luis',
+    'Atlético':             'Atletico San Luis',
 }
 
 def normalizar_nombre(nombre):
@@ -112,12 +114,47 @@ def actualizar_vidas():
     jornada, eventos = resultado
     print(f"\nProcesando Jornada {jornada}...\n")
 
-    # 2. Obtener perdedores de esa jornada
+    # 2. Obtener todos los perfiles activos
+    todos_perfiles = supabase.table("perfiles") \
+        .select("id, vidas") \
+        .eq("eliminado", False) \
+        .execute()
+    todos_user_ids = set(p['id'] for p in todos_perfiles.data)
+
+    # 3. Obtener usuarios que SÍ escogieron en esta jornada
+    selecciones_jornada = supabase.table("selecciones") \
+        .select("user_id, equipo_id, equipos_ligamx(nombre)") \
+        .eq("jornada", jornada) \
+        .execute()
+    users_con_seleccion = set(s['user_id'] for s in selecciones_jornada.data)
+
+    # 4. Penalizar usuarios que NO escogieron equipo
+    users_sin_seleccion = todos_user_ids - users_con_seleccion
+    for u_id in users_sin_seleccion:
+        perfil = next(p for p in todos_perfiles.data if p['id'] == u_id)
+        vidas_actuales = perfil['vidas']
+        nuevas_vidas = max(0, vidas_actuales - 1)
+
+        supabase.table("perfiles").update({
+            "vidas": nuevas_vidas,
+            "eliminado": nuevas_vidas == 0
+        }).eq("id", u_id).execute()
+
+        # Insertar fila con estatus 'fallo' para que se pinte rojo en la tabla
+        supabase.table("selecciones").insert({
+            "user_id": u_id,
+            "equipo_id": None,
+            "jornada": jornada,
+            "estatus": "Pelas"
+        }).execute()
+
+        print(f"  Usuario {u_id} perdió una vida por no escoger equipo. Vidas: {nuevas_vidas}")
+
+    # 5. Obtener perdedores de esa jornada
     equipos_que_perdieron = obtener_perdedores_de_jornada(eventos)
 
     if not equipos_que_perdieron:
         print("No hubo perdedores esta jornada (todos empataron).")
-        # Marcar todas las selecciones de esta jornada como 'acierto'
         supabase.table("selecciones") \
             .update({"estatus": "acierto"}) \
             .eq("jornada", jornada) \
@@ -127,14 +164,10 @@ def actualizar_vidas():
 
     print(f"\nEquipos que perdieron en Jornada {jornada}: {equipos_que_perdieron}\n")
 
-    # 3. Marcar como 'acierto' los equipos que NO perdieron
-    selecciones_jornada = supabase.table("selecciones") \
-        .select("user_id, equipo_id, equipos_ligamx(nombre)") \
-        .eq("jornada", jornada) \
-        .eq("estatus", "pendiente") \
-        .execute()
-
+    # 6. Marcar como 'acierto' los que NO perdieron
     for sel in selecciones_jornada.data:
+        if sel.get('estatus') == 'fallo':
+            continue
         nombre_equipo = sel.get('equipos_ligamx', {}).get('nombre', '')
         if nombre_equipo and nombre_equipo not in equipos_que_perdieron:
             supabase.table("selecciones") \
@@ -144,7 +177,7 @@ def actualizar_vidas():
                 .execute()
             print(f"  Usuario {sel['user_id']} acertó con {nombre_equipo}")
 
-    # 4. Restar vidas a los que eligieron equipos perdedores
+    # 7. Restar vidas a los que eligieron equipos perdedores
     for nombre_equipo in equipos_que_perdieron:
         res_equipo = supabase.table("equipos_ligamx") \
             .select("id") \
@@ -157,14 +190,14 @@ def actualizar_vidas():
 
         id_equipo = res_equipo.data[0]['id']
 
-        selecciones = supabase.table("selecciones") \
+        selecciones_perdedor = supabase.table("selecciones") \
             .select("user_id") \
             .eq("equipo_id", id_equipo) \
             .eq("jornada", jornada) \
             .eq("estatus", "pendiente") \
             .execute()
 
-        for sel in selecciones.data:
+        for sel in selecciones_perdedor.data:
             u_id = sel['user_id']
 
             perfil = supabase.table("perfiles") \
