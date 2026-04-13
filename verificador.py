@@ -1,6 +1,7 @@
 import os
 import requests
 from supabase import create_client, Client
+from tabulate import tabulate
 
 print("VERSION 2 - actualizado")
 # --- CONFIGURACIÓN ---
@@ -113,6 +114,93 @@ def obtener_perdedores_de_jornada(eventos):
         # Empate: nadie pierde vida
 
     return list(set(perdedores))
+
+
+def mostrar_equipos_pendientes_usuario(user_id_en_sesion, jornada_actual=None):
+    """
+    Muestra una tabla con los equipos que el usuario en sesión aún no ha seleccionado.
+    Si jornada_actual es None, muestra todas las jornadas pendientes.
+    """
+    print("\n" + "=" * 60)
+    print(f"EQUIPOS PENDIENTES DE SELECCIÓN - Usuario {user_id_en_sesion}")
+    print("=" * 60)
+    
+    # Obtener todos los equipos de Liga MX
+    todos_equipos = supabase.table("equipos_ligamx") \
+        .select("id, nombre") \
+        .order("nombre") \
+        .execute()
+    
+    if not todos_equipos.data:
+        print("No hay equipos registrados en la base de datos.")
+        return
+    
+    # Obtener selecciones del usuario
+    if jornada_actual is not None:
+        # Para una jornada específica
+        selecciones_usuario = supabase.table("selecciones") \
+            .select("equipo_id, jornada") \
+            .eq("user_id", user_id_en_sesion) \
+            .eq("jornada", jornada_actual) \
+            .neq("estatus", "fallo") \
+            .execute()
+        
+        equipos_seleccionados_ids = {s['equipo_id'] for s in selecciones_usuario.data if s['equipo_id']}
+        
+        # Filtrar equipos no seleccionados en esta jornada
+        equipos_pendientes = [
+            equipo for equipo in todos_equipos.data 
+            if equipo['id'] not in equipos_seleccionados_ids
+        ]
+        
+        print(f"\nJornada {jornada_actual}:")
+        if equipos_pendientes:
+            tabla_datos = [
+                [idx + 1, equipo['nombre']] 
+                for idx, equipo in enumerate(equipos_pendientes)
+            ]
+            print(tabulate(tabla_datos, headers=["#", "Equipo"], tablefmt="grid"))
+        else:
+            print("Ya has seleccionado un equipo para esta jornada.")
+            
+    else:
+        # Para todas las jornadas pendientes
+        selecciones_usuario = supabase.table("selecciones") \
+            .select("equipo_id, jornada, estatus") \
+            .eq("user_id", user_id_en_sesion) \
+            .neq("estatus", "fallo") \
+            .execute()
+        
+        # Agrupar selecciones por jornada
+        selecciones_por_jornada = {}
+        for sel in selecciones_usuario.data:
+            jornada = sel['jornada']
+            if jornada not in selecciones_por_jornada:
+                selecciones_por_jornada[jornada] = []
+            if sel['equipo_id']:
+                selecciones_por_jornada[jornada].append(sel['equipo_id'])
+        
+        # Mostrar pendientes por jornada
+        for jornada in sorted(selecciones_por_jornada.keys()):
+            equipos_seleccionados_ids = set(selecciones_por_jornada[jornada])
+            equipos_pendientes = [
+                equipo for equipo in todos_equipos.data 
+                if equipo['id'] not in equipos_seleccionados_ids
+            ]
+            
+            print(f"\nJornada {jornada}:")
+            if equipos_pendientes:
+                tabla_datos = [
+                    [idx + 1, equipo['nombre']] 
+                    for idx, equipo in enumerate(equipos_pendientes[:10])  # Limitar a 10 por legibilidad
+                ]
+                print(tabulate(tabla_datos, headers=["#", "Equipo"], tablefmt="grid"))
+                if len(equipos_pendientes) > 10:
+                    print(f"... y {len(equipos_pendientes) - 10} equipos más")
+            else:
+                print("Ya has seleccionado un equipo para esta jornada.")
+    
+    print("\n" + "=" * 60)
 
 
 def actualizar_vidas():
@@ -239,6 +327,11 @@ def actualizar_vidas():
             print(f"  Usuario {u_id} perdió una vida por {nombre_equipo}. Vidas: {nuevas_vidas}")
 
     print(f"\nJornada {jornada} procesada correctamente.")
+    
+    # Mostrar equipos pendientes para el usuario en sesión (ejemplo con user_id = 1)
+    # NOTA: Cambiar el user_id_en_sesion por el ID del usuario realmente en sesión
+    user_id_en_sesion = 1  # Reemplazar con el ID del usuario en sesión
+    mostrar_equipos_pendientes_usuario(user_id_en_sesion, jornada)
 
 
 if __name__ == "__main__":
