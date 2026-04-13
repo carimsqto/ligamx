@@ -2,6 +2,7 @@ requests
 supabase
 flask
 flask-cors
+tabulate
 
 
 
