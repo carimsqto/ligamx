@@ -2,6 +2,7 @@ import os
 import requests
 from supabase import create_client, Client
 
+print("VERSION 2 - actualizado")
 # --- CONFIGURACIÓN ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "TU_SUPABASE_URL_AQUI")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_KEY_AQUI")
@@ -48,27 +49,42 @@ def obtener_jornada_mas_reciente():
     jornadas_pendientes = sorted(set(s['jornada'] for s in selecciones.data))
     print(f"Jornadas con selecciones pendientes: {jornadas_pendientes}")
 
+    # Solo procesar jornadas del Clausura 2026 (jornada 1 en adelante)
+    # Ignorar jornadas con datos basura del Apertura
+    jornadas_pendientes = [j for j in jornadas_pendientes if j >= 1]
+
+    if not jornadas_pendientes:
+        print("No hay jornadas válidas del Clausura pendientes.")
+        return None
+
     # Revisar cada jornada pendiente y ver si ya terminaron sus partidos
     for jornada in jornadas_pendientes:
+        print(f"Revisando jornada {jornada}...")
         url = f"{BASE_URL}/eventsround.php?id={LIGA_MX_ID}&r={jornada}&s=2025-2026"
-        response = requests.get(url)
-        eventos = response.json().get('events', []) or []
+        try:
+            response = requests.get(url, timeout=10)
+            eventos = response.json().get('events', []) or []
+        except Exception as e:
+            print(f"  Error al consultar jornada {jornada}: {e}")
+            continue
 
         # Filtrar solo partidos de 2026 (Clausura)
         eventos_2026 = [e for e in eventos if e.get('dateEvent', '').startswith('2026')]
 
         if not eventos_2026:
+            print(f"  Jornada {jornada}: sin partidos de 2026, saltando.")
             continue
 
         # Verificar si todos los partidos de la jornada ya terminaron
         terminados = [e for e in eventos_2026 if e.get('intHomeScore') not in (None, '')]
-        
+
         if len(terminados) == len(eventos_2026) and len(terminados) > 0:
-            print(f"Jornada {jornada}: todos los partidos terminados ({len(terminados)}/{len(eventos_2026)})")
+            print(f"  Jornada {jornada}: todos los partidos terminados ({len(terminados)}/{len(eventos_2026)})")
             return jornada, eventos_2026
         else:
-            print(f"Jornada {jornada}: {len(terminados)}/{len(eventos_2026)} partidos terminados, aún no se procesa.")
+            print(f"  Jornada {jornada}: {len(terminados)}/{len(eventos_2026)} partidos terminados, aún no se procesa.")
 
+    print("Ninguna jornada pendiente tiene todos los partidos terminados.")
     return None
 
 
@@ -145,7 +161,7 @@ def actualizar_vidas():
             "user_id": u_id,
             "equipo_id": None,
             "jornada": jornada,
-            "estatus": "Pelas"
+            "estatus": "fallo"
         }).execute()
 
         print(f"  Usuario {u_id} perdió una vida por no escoger equipo. Vidas: {nuevas_vidas}")
