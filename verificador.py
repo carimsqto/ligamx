@@ -1,9 +1,7 @@
 import os
 import requests
 from supabase import create_client, Client
-from tabulate import tabulate
 
-print("VERSION 2 - actualizado")
 # --- CONFIGURACIÓN ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "TU_SUPABASE_URL_AQUI")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_KEY_AQUI")
@@ -116,12 +114,6 @@ def obtener_perdedores_de_jornada(eventos):
     return list(set(perdedores))
 
 
-def mostrar_equipos_pendientes_usuario(user_id_en_sesion, jornada_actual=None):
-    """
-    Muestra una tabla con los equipos que el usuario en sesión aún no ha seleccionado.
-    Si jornada_actual es None, muestra todas las jornadas pendientes.
-    """
-    print("\n" + "=" * 60)
     print(f"EQUIPOS PENDIENTES DE SELECCIÓN - Usuario {user_id_en_sesion}")
     print("=" * 60)
     
@@ -327,11 +319,6 @@ def actualizar_vidas():
             print(f"  Usuario {u_id} perdió una vida por {nombre_equipo}. Vidas: {nuevas_vidas}")
 
     print(f"\nJornada {jornada} procesada correctamente.")
-    
-    # Mostrar equipos pendientes para el usuario en sesión (ejemplo con user_id = 1)
-    # NOTA: Cambiar el user_id_en_sesion por el ID del usuario realmente en sesión
-    user_id_en_sesion = 1  # Reemplazar con el ID del usuario en sesión
-    mostrar_equipos_pendientes_usuario(user_id_en_sesion, jornada)
 
 
 if __name__ == "__main__":
