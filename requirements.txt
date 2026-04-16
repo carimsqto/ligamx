@@ -3,6 +3,7 @@ supabase
 flask
 flask-cors
 tabulate
+PyJWT
 
 
 
