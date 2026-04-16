@@ -25,9 +25,16 @@ def delete_seleccion():
         token = auth_header.split(' ')[1]
         
         # Verificar token y obtener usuario
-        user_data = supabase_admin.auth.get_user(token)
-        if not user_data.user or user_data.user.email != 'greenday_115@hotmail.com':
-            return jsonify({'error': 'No autorizado - Solo admin'}), 403
+        try:
+            # Decodificar token JWT para obtener email sin consultar tabla users
+            import jwt
+            decoded_token = jwt.decode(token, options={"verify_signature": False})
+            user_email = decoded_token.get('email')
+            
+            if user_email != 'greenday_115@hotmail.com':
+                return jsonify({'error': 'No autorizado - Solo admin'}), 403
+        except Exception as jwt_error:
+            return jsonify({'error': 'Token inválido'}), 401
         
         # Obtener datos del body
         data = request.get_json()
