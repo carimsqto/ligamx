@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
 import requests
+import time
 from datetime import datetime, timedelta
 import jwt
 from supabase import create_client, Client
@@ -13,6 +14,76 @@ CORS(app)  # Permitir llamadas desde el frontend
 SUPABASE_URL = "https://povaakggggoeewgqfyot.supabase.co"
 SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvdmFha2dnZ2dvZWV3Z3FmeW90Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjEyMzM4MywiZXhwIjoyMDg3Njk5MzgzfQ.zBwW-M-0S3IsPn8SepkXm7OalXGL6NovsqVriZzBXDQ"
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+
+def safe_error_response(error, status_code=503):
+    """Devuelve un mensaje amigable para errores de red/servicio."""
+    raw_message = str(error).lower()
+    network_like = [
+        "fetch",
+        "network",
+        "connection",
+        "timeout",
+        "temporarily unavailable",
+        "name resolution",
+    ]
+
+    if any(token in raw_message for token in network_like):
+        return jsonify({
+            "success": False,
+            "error": "Servicio temporalmente no disponible. Intenta de nuevo en unos segundos."
+        }), status_code
+
+    return jsonify({
+        "success": False,
+        "error": "No se pudo completar la solicitud."
+    }), 500
+
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def register_user():
+    """Registro de usuario con reintentos para evitar errores transitorios."""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        payload = request.get_json() or {}
+        email = (payload.get('email') or '').strip().lower()
+        password = payload.get('password') or ''
+
+        if not email or not password:
+            return jsonify({"success": False, "error": "Email y contrasena son requeridos"}), 400
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = supabase_admin.auth.sign_up({
+                    "email": email,
+                    "password": password
+                })
+
+                user = getattr(result, "user", None)
+                if user:
+                    return jsonify({
+                        "success": True,
+                        "message": "Cuenta creada correctamente",
+                        "user_id": user.id
+                    }), 201
+
+                # Si no hubo excepción pero tampoco user, lo tratamos como error controlado
+                return jsonify({
+                    "success": False,
+                    "error": "No se pudo crear la cuenta en este momento"
+                }), 502
+
+            except Exception as register_error:
+                if attempt == max_attempts:
+                    return safe_error_response(register_error)
+                # Backoff pequeño para errores transitorios
+                time.sleep(0.8 * attempt)
+
+    except Exception as e:
+        return safe_error_response(e)
 
 @app.route('/api/calendario-ligamx')
 def obtener_calendario():
@@ -144,6 +215,68 @@ def test_endpoint():
         'status': 'OK',
         'routes': [str(rule) for rule in app.url_map.iter_rules()]
     })
+
+@app.route('/api/admin/reset-tournament', methods=['DELETE', 'OPTIONS'])
+def reset_tournament():
+    """Endpoint para borrar todas las tablas y empezar el torneo en ceros"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    try:
+        # Obtener token del header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Token no proporcionado'}), 401
+        
+        token = auth_header.split(' ')[1]
+        
+        # Decodificar token JWT para obtener email
+        try:
+            decoded_token = jwt.decode(token, options={"verify_signature": False})
+            user_email = decoded_token.get('email')
+            
+            if user_email != 'greenday_115@hotmail.com':
+                return jsonify({'error': 'No autorizado - Solo admin'}), 403
+                
+        except Exception as jwt_error:
+            return jsonify({'error': 'Token inválido'}), 401
+        
+        # Lista de tablas a borrar (en orden correcto para evitar conflictos de FK)
+        tablas = [
+            'selecciones',
+            'resultados',
+            'jornadas',
+            'equipos',
+            'usuarios'
+        ]
+        
+        resultados = {}
+        
+        # Borrar cada tabla
+        for tabla in tablas:
+            try:
+                if tabla == 'usuarios':
+                    # No borrar al admin principal
+                    result = supabase_admin.table(tabla).delete().neq('email', 'greenday_115@hotmail.com').execute()
+                    resultados[tabla] = "Borrada (admin conservado)"
+                else:
+                    result = supabase_admin.table(tabla).delete().neq('id', 0).execute()
+                    resultados[tabla] = "Borrada correctamente"
+                    
+                if hasattr(result, 'error') and result.error:
+                    resultados[tabla] = f"Error: {str(result.error)}"
+                    
+            except Exception as e:
+                resultados[tabla] = f"Error: {str(e)}"
+        
+        return jsonify({
+            'success': True,
+            'message': 'Torneo reseteado correctamente',
+            'resultados': resultados
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Error del servidor: {str(e)}'}), 500
 
 @app.route('/api/verificar', methods=['POST'])
 def verificar_jornada():
