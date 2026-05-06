@@ -40,6 +40,66 @@ def safe_error_response(error, status_code=503):
     }), 500
 
 
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def login_user():
+    """Inicio de sesión de usuario"""
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        payload = request.get_json() or {}
+        email = (payload.get('email') or '').strip().lower()
+        password = payload.get('password') or ''
+
+        if not email or not password:
+            return jsonify({"success": False, "error": "Email y contraseña son requeridos"}), 400
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                result = supabase_admin.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
+
+                user = getattr(result, "user", None)
+                session = getattr(result, "session", None)
+                
+                if user and session:
+                    # Crear token JWT con información del usuario
+                    token_payload = {
+                        "email": user.email,
+                        "user_id": user.id,
+                        "exp": datetime.utcnow() + timedelta(hours=24)
+                    }
+                    token = jwt.encode(token_payload, "your-secret-key", algorithm="HS256")
+                    
+                    return jsonify({
+                        "success": True,
+                        "message": "Sesión iniciada correctamente",
+                        "user": {
+                            "id": user.id,
+                            "email": user.email
+                        },
+                        "token": token,
+                        "session_token": session.access_token
+                    }), 200
+
+                # Si no hubo excepción pero tampoco user, lo tratamos como error controlado
+                return jsonify({
+                    "success": False,
+                    "error": "Credenciales incorrectas"
+                }), 401
+
+            except Exception as login_error:
+                if attempt == max_attempts:
+                    return safe_error_response(login_error)
+                # Backoff pequeño para errores transitorios
+                time.sleep(0.8 * attempt)
+
+    except Exception as e:
+        return safe_error_response(e)
+
 @app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
 def register_user():
     """Registro de usuario con reintentos para evitar errores transitorios."""
