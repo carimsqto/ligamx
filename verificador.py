@@ -59,7 +59,7 @@ def obtener_jornada_mas_reciente():
     # Revisar cada jornada pendiente y ver si ya terminaron sus partidos
     for jornada in jornadas_pendientes:
         print(f"Revisando jornada {jornada}...")
-        url = f"{BASE_URL}/eventsround.php?id={LIGA_MX_ID}&r={jornada}&s=2025-2026"
+        url = f"{BASE_URL}/eventsround.php?id={LIGA_MX_ID}&r={jornada}&s=2026-2027"
         try:
             response = requests.get(url, timeout=10)
             eventos = response.json().get('events', []) or []
