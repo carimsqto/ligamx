@@ -265,6 +265,40 @@ def obtener_jornada_especifica(round):
             "error": str(e)
         }), 500
 
+@app.route('/api/calendario-temporada')
+def obtener_temporada_completa():
+    """
+    Endpoint para obtener TODOS los partidos de la temporada en una sola llamada.
+    Esto evita el rate limiting de TheSportsDB cuando se detecta la jornada actual.
+    """
+    try:
+        temporada = "2026-2027"  # Temporada actual
+        url_season = f"{THESPORTSDB_BASE}/eventsseason.php"
+        resp_season = requests.get(
+            url_season,
+            params={"id": LIGA_MX_ID, "s": temporada},
+            timeout=10,
+        )
+        resp_season.raise_for_status()
+        partidos = resp_season.json().get("events") or []
+
+        return jsonify({
+            "success": True,
+            "temporada": temporada,
+            "partidos": partidos
+        })
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "success": False,
+            "error": f"No se pudo consultar TheSportsDB: {e}"
+        }), 503
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/admin/delete-seleccion', methods=['DELETE', 'OPTIONS'])
 def delete_seleccion():
     """Endpoint para que el admin borre selecciones de usuarios"""
