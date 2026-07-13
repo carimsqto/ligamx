@@ -230,6 +230,41 @@ def obtener_calendario():
             "error": str(e)
         }), 500
 
+@app.route('/api/calendario-jornada/<int:round>')
+def obtener_jornada_especifica(round):
+    """
+    Endpoint para obtener los partidos de una jornada específica.
+    Sirve como proxy para evitar problemas de CORS en el frontend.
+    """
+    try:
+        temporada = "2026-2027"  # Temporada actual
+        url_round = f"{THESPORTSDB_BASE}/eventsround.php"
+        resp_round = requests.get(
+            url_round,
+            params={"id": LIGA_MX_ID, "r": round, "s": temporada},
+            timeout=10,
+        )
+        resp_round.raise_for_status()
+        partidos = resp_round.json().get("events") or []
+
+        return jsonify({
+            "success": True,
+            "round": round,
+            "temporada": temporada,
+            "partidos": partidos
+        })
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "success": False,
+            "error": f"No se pudo consultar TheSportsDB: {e}"
+        }), 503
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/admin/delete-seleccion', methods=['DELETE', 'OPTIONS'])
 def delete_seleccion():
     """Endpoint para que el admin borre selecciones de usuarios"""
