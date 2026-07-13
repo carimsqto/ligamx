@@ -11,8 +11,19 @@ app = Flask(__name__)
 CORS(app)  # Permitir llamadas desde el frontend
 
 # Configuración Supabase con SERVICE ROLE KEY
-SUPABASE_URL = "https://povaakggggoeewgqfyot.supabase.co"
-SUPABASE_SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvdmFha2dnZ2dvZWV3Z3FmeW90Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjEyMzM4MywiZXhwIjoyMDg3Njk5MzgzfQ.zBwW-M-0S3IsPn8SepkXm7OalXGL6NovsqVriZzBXDQ"
+# Estas dos llaves YA NO están escritas aquí. Se leen desde variables de entorno
+# que configuras en Render (Settings -> Environment). Si por alguna razón no
+# existen (por ejemplo corriendo en tu compu sin configurarlas), el programa
+# se detiene con un mensaje claro en vez de fallar de forma rara más adelante.
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise RuntimeError(
+        "Faltan las variables de entorno SUPABASE_URL y/o SUPABASE_SERVICE_KEY. "
+        "Configúralas en Render (o en tu archivo .env local) antes de correr la app."
+    )
+
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 
@@ -72,7 +83,7 @@ def login_user():
                         "user_id": user.id,
                         "exp": datetime.utcnow() + timedelta(hours=24)
                     }
-                    token = jwt.encode(token_payload, "your-secret-key", algorithm="HS256")
+                    token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
                     
                     return jsonify({
                         "success": True,
@@ -145,77 +156,74 @@ def register_user():
     except Exception as e:
         return safe_error_response(e)
 
+LIGA_MX_ID = "4350"  # id de "Mexican Primera League" en TheSportsDB
+THESPORTSDB_KEY = os.environ.get("THESPORTSDB_KEY", "123")  # "123" es la key gratuita pública, no es secreta
+THESPORTSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
+
+# Secreto para firmar los tokens JWT de sesión. También sale de una variable
+# de entorno. Si alguien conociera este valor podría fabricar tokens falsos
+# y hacerse pasar por cualquier usuario, así que nunca debe ir escrito en el código.
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError(
+        "Falta la variable de entorno JWT_SECRET. Configúrala en Render (o en tu .env local)."
+    )
+
+# Correo del único usuario que puede usar los endpoints de admin.
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "greenday_115@hotmail.com")
+
+
 @app.route('/api/calendario-ligamx')
 def obtener_calendario():
-    """Endpoint para obtener el calendario de la jornada actual de Liga MX"""
-    try:
-        # API key configurada directamente para pruebas
-        api_key = "662aa4742dmshf1b492eb2aa8fc7p150df8jsnb71cc562854a"
-        # api_key = os.environ.get("API_FOOTBALL_KEY")  # Descomentar para producción
-        
-        url = "https://v3.football.api-sports.io/fixtures"
-        headers = {
-            'x-rapidapi-host': "v3.football.api-sports.io",
-            'x-rapidapi-key': api_key
-        }
-        
-        # Obtener fecha actual y buscar partidos en un rango más amplio
-        hoy = datetime.now()
-        params = {
-            # "league": "262",  # Comentado para probar API general
-            "from": (hoy - timedelta(days=30)).strftime('%Y-%m-%d'),  # 30 días antes
-            "to": (hoy + timedelta(days=30)).strftime('%Y-%m-%d')     # 30 días después
-        }
+    """
+    Endpoint para obtener el calendario de la próxima jornada de Liga MX.
 
-        response = requests.get(url, headers=headers, params=params)
-        data = response.json()
-        
-        # Debug: mostrar qué devuelve la API
-        print(f"Status code: {response.status_code}")
-        print(f"Response data: {data}")
-        
-        # Si no hay partidos, usar datos de ejemplo
-        partidos = data.get('response', [])
-        if not partidos:
-            print("No se encontraron partidos, usando datos de ejemplo")
-            partidos = [
-                {
-                    "fixture": {
-                        "date": "2026-03-08T20:00:00+00:00",
-                        "venue": {"name": "Estadio Azteca"}
-                    },
-                    "teams": {
-                        "home": {"name": "Club América"},
-                        "away": {"name": "Chivas"}
-                    }
-                },
-                {
-                    "fixture": {
-                        "date": "2026-03-09T19:00:00+00:00",
-                        "venue": {"name": "Estadio Akron"}
-                    },
-                    "teams": {
-                        "home": {"name": "Chivas"},
-                        "away": {"name": "Tigres"}
-                    }
-                },
-                {
-                    "fixture": {
-                        "date": "2026-03-10T21:00:00+00:00",
-                        "venue": {"name": "Estadio Universitario"}
-                    },
-                    "teams": {
-                        "home": {"name": "Tigres"},
-                        "away": {"name": "Monterrey"}
-                    }
-                }
-            ]
-        
+    Estrategia (sin hardcodear temporada ni jornada):
+      1. Pedimos a TheSportsDB los próximos partidos de la liga
+         (eventsnextleague.php) para saber cuál es la jornada y
+         temporada que sigue.
+      2. Con esa jornada y temporada, pedimos el listado completo
+         de esa jornada (eventsround.php) para regresar todos sus
+         partidos, no solo los primeros.
+    """
+    try:
+        # 1. Próximos partidos (para detectar jornada y temporada actuales)
+        url_next = f"{THESPORTSDB_BASE}/eventsnextleague.php"
+        resp_next = requests.get(url_next, params={"id": LIGA_MX_ID}, timeout=10)
+        resp_next.raise_for_status()
+        proximos = resp_next.json().get("events") or []
+
+        if not proximos:
+            return jsonify({
+                "success": False,
+                "error": "TheSportsDB no tiene partidos próximos cargados todavía."
+            }), 502
+
+        jornada = proximos[0]["intRound"]
+        temporada = proximos[0]["strSeason"]
+
+        # 2. Todos los partidos de esa jornada
+        url_round = f"{THESPORTSDB_BASE}/eventsround.php"
+        resp_round = requests.get(
+            url_round,
+            params={"id": LIGA_MX_ID, "r": jornada, "s": temporada},
+            timeout=10,
+        )
+        resp_round.raise_for_status()
+        partidos = resp_round.json().get("events") or proximos
+
         return jsonify({
             "success": True,
+            "jornada": jornada,
+            "temporada": temporada,
             "partidos": partidos
         })
-        
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "success": False,
+            "error": f"No se pudo consultar TheSportsDB: {e}"
+        }), 503
     except Exception as e:
         return jsonify({
             "success": False,
@@ -241,7 +249,7 @@ def delete_seleccion():
             decoded_token = jwt.decode(token, options={"verify_signature": False})
             user_email = decoded_token.get('email')
             
-            if user_email != 'greenday_115@hotmail.com':
+            if user_email != ADMIN_EMAIL:
                 return jsonify({'error': 'No autorizado - Solo admin'}), 403
                 
         except Exception as jwt_error:
@@ -295,7 +303,7 @@ def reset_tournament():
             decoded_token = jwt.decode(token, options={"verify_signature": False})
             user_email = decoded_token.get('email')
             
-            if user_email != 'greenday_115@hotmail.com':
+            if user_email != ADMIN_EMAIL:
                 return jsonify({'error': 'No autorizado - Solo admin'}), 403
                 
         except Exception as jwt_error:
@@ -317,7 +325,7 @@ def reset_tournament():
             try:
                 if tabla == 'usuarios':
                     # No borrar al admin principal
-                    result = supabase_admin.table(tabla).delete().neq('email', 'greenday_115@hotmail.com').execute()
+                    result = supabase_admin.table(tabla).delete().neq('email', ADMIN_EMAIL).execute()
                     resultados[tabla] = "Borrada (admin conservado)"
                 else:
                     result = supabase_admin.table(tabla).delete().neq('id', 0).execute()
