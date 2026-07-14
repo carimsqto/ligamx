@@ -149,7 +149,25 @@ def register_user():
 
             except Exception as register_error:
                 if attempt == max_attempts:
-                    return safe_error_response(register_error)
+                    # Mostrar el error específico de Supabase
+                    error_msg = str(register_error)
+                    if "already registered" in error_msg.lower() or "user already exists" in error_msg.lower():
+                        return jsonify({
+                            "success": False,
+                            "error": "Este correo ya está registrado. Inicia sesión en su lugar."
+                        }), 400
+                    elif "password" in error_msg.lower():
+                        return jsonify({
+                            "success": False,
+                            "error": "La contraseña debe tener al menos 6 caracteres."
+                        }), 400
+                    elif "email" in error_msg.lower():
+                        return jsonify({
+                            "success": False,
+                            "error": "El formato del correo no es válido."
+                        }), 400
+                    else:
+                        return safe_error_response(register_error)
                 # Backoff pequeño para errores transitorios
                 time.sleep(0.8 * attempt)
 
