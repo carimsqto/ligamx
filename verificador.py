@@ -1,4 +1,6 @@
 import os
+import unicodedata
+import difflib
 import requests
 from supabase import create_client, Client
 
@@ -16,21 +18,78 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BASE_URL = "https://www.thesportsdb.com/api/v1/json/123"
 LIGA_MX_ID = "4350"
 
-# Nombres con acento que vienen de la API → como están en la base de datos
+# Overrides manuales para nombres cortos/alias que la API regresa a veces
+# (clave = como llega de la API, valor = nombre EXACTO en la tabla equipos_ligamx)
 NORMALIZAR_NOMBRES = {
     'Mazatlán':             'Mazatlan',
     'León':                 'Leon',
     'Querétaro':            'Queretaro',
     'Querétaro FC':         'Queretaro FC',
     'FC Juárez':            'FC Juarez',
-    'Atlético de San Luis': 'Atletico San Luis',
-    'Atletico de San Luis': 'Atletico San Luis',
-    'Atlético San Luis':    'Atletico San Luis',
-    'Atlético':             'Atletico San Luis',
+    'Juárez':               'FC Juarez',
+    'Juarez':               'FC Juarez',
+    'Atlético de San Luis': 'Atletico de San Luis',
+    'Atletico de San Luis': 'Atletico de San Luis',
+    'Atlético San Luis':    'Atletico de San Luis',
+    'Atlético':             'Atletico de San Luis',
+    'San Luis':             'Atletico de San Luis',
+    'Tigres UANL':          'Tigres',
+    'UANL':                 'Tigres',
+    'Tigres':               'Tigres',
 }
 
+# Se llena en tiempo de ejecución con los nombres reales de la tabla equipos_ligamx
+_NOMBRES_BD_CACHE = None
+
+
+def _quitar_acentos(texto):
+    """Convierte 'Atlético' -> 'Atletico', ignorando mayúsculas."""
+    if not texto:
+        return ""
+    sin_acentos = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('ascii')
+    return sin_acentos.strip().lower()
+
+
+def _cargar_nombres_bd():
+    """Trae y cachea los nombres reales de equipos_ligamx (una sola vez por corrida)."""
+    global _NOMBRES_BD_CACHE
+    if _NOMBRES_BD_CACHE is None:
+        res = supabase.table("equipos_ligamx").select("id, nombre").execute()
+        _NOMBRES_BD_CACHE = res.data or []
+    return _NOMBRES_BD_CACHE
+
+
 def normalizar_nombre(nombre):
-    return NORMALIZAR_NOMBRES.get(nombre, nombre)
+    """
+    Devuelve el nombre EXACTO como está guardado en equipos_ligamx.
+    Orden de intentos:
+      1. Override manual (NORMALIZAR_NOMBRES)
+      2. Coincidencia exacta ignorando acentos/mayúsculas contra la BD
+      3. Coincidencia difusa (fuzzy) contra la BD, con warning en consola
+      4. Si nada funciona, regresa el nombre original tal cual llegó (y avisa)
+    """
+    if nombre in NORMALIZAR_NOMBRES:
+        return NORMALIZAR_NOMBRES[nombre]
+
+    equipos_bd = _cargar_nombres_bd()
+    nombre_sin_acentos = _quitar_acentos(nombre)
+
+    # Intento 2: match exacto ignorando acentos/mayúsculas
+    for equipo in equipos_bd:
+        if _quitar_acentos(equipo['nombre']) == nombre_sin_acentos:
+            return equipo['nombre']
+
+    # Intento 3: fuzzy match como último recurso
+    nombres_bd = [e['nombre'] for e in equipos_bd]
+    sugerencias = difflib.get_close_matches(nombre, nombres_bd, n=1, cutoff=0.6)
+    if sugerencias:
+        print(f"  ⚠️  '{nombre}' no coincide exactamente. Usando el más parecido: '{sugerencias[0]}'. "
+              f"Verifica y agrega este alias a NORMALIZAR_NOMBRES si es correcto.")
+        return sugerencias[0]
+
+    print(f"  ⚠️  '{nombre}' no se pudo emparejar con NINGÚN equipo de la base de datos. "
+          f"Revisa el nombre exacto en la API vs. la tabla equipos_ligamx.")
+    return nombre
 
 
 def obtener_jornada_mas_reciente():
