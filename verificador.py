@@ -3,10 +3,15 @@ import requests
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN ---
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "TU_SUPABASE_URL_AQUI")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "TU_SUPABASE_KEY_AQUI")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise RuntimeError(
+        "Faltan las variables de entorno SUPABASE_URL y/o SUPABASE_SERVICE_KEY."
+    )
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 BASE_URL = "https://www.thesportsdb.com/api/v1/json/123"
 LIGA_MX_ID = "4350"
