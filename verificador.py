@@ -349,21 +349,31 @@ def actualizar_vidas(jornada_especifica=None):
 
     # 2. Obtener todos los perfiles activos
     todos_perfiles = supabase.table("perfiles") \
-        .select("id, vidas") \
+        .select("id, username, vidas") \
         .eq("eliminado", False) \
         .execute()
     todos_user_ids = set(p['id'] for p in todos_perfiles.data)
+    usuarios_por_id = {p['id']: p['username'] for p in todos_perfiles.data}
+    print(f"Total usuarios activos: {len(todos_user_ids)}")
+    print(f"Usuarios activos: {[usuarios_por_id[uid] for uid in todos_user_ids]}")
 
     # 3. Obtener usuarios que SÍ escogieron en esta jornada (con equipo_id válido)
     selecciones_jornada = supabase.table("selecciones") \
         .select("user_id, equipo_id, equipos_ligamx(nombre)") \
         .eq("jornada", jornada) \
         .execute()
+    print(f"Total selecciones para jornada {jornada}: {len(selecciones_jornada.data)}")
+    print(f"Selecciones: {selecciones_jornada.data}")
+
     # Solo considerar usuarios que tienen un equipo_id válido (no null)
     users_con_seleccion = set(s['user_id'] for s in selecciones_jornada.data if s['equipo_id'] is not None)
+    usuarios_con_seleccion_nombres = [usuarios_por_id[uid] for uid in users_con_seleccion]
+    print(f"Usuarios con selección válida: {usuarios_con_seleccion_nombres}")
 
     # 4. Penalizar usuarios que NO escogieron equipo
     users_sin_seleccion = todos_user_ids - users_con_seleccion
+    usuarios_sin_seleccion_nombres = [usuarios_por_id[uid] for uid in users_sin_seleccion]
+    print(f"Usuarios sin selección: {usuarios_sin_seleccion_nombres}")
     for u_id in users_sin_seleccion:
         perfil = next(p for p in todos_perfiles.data if p['id'] == u_id)
         vidas_actuales = perfil['vidas']
@@ -377,7 +387,7 @@ def actualizar_vidas(jornada_especifica=None):
             .execute()
 
         if fallo_existente.data:
-            print(f"  Usuario {u_id} ya tiene registro de fallo para jornada {jornada}, saltando...")
+            print(f"  {usuarios_por_id[u_id]} ya tiene registro de fallo para jornada {jornada}, saltando...")
             continue
 
         nuevas_vidas = max(0, vidas_actuales - 1)
@@ -395,7 +405,7 @@ def actualizar_vidas(jornada_especifica=None):
             "estatus": "fallo"
         }).execute()
 
-        print(f"  Usuario {u_id} perdió una vida por no escoger equipo. Vidas: {nuevas_vidas}")
+        print(f"  {usuarios_por_id[u_id]} perdió una vida por no escoger equipo. Vidas: {nuevas_vidas}")
 
     # 5. Obtener perdedores de esa jornada
     equipos_que_perdieron = obtener_perdedores_de_jornada(eventos)
@@ -412,19 +422,25 @@ def actualizar_vidas(jornada_especifica=None):
     print(f"\nEquipos que perdieron en Jornada {jornada}: {equipos_que_perdieron}\n")
 
     # 6. Marcar como 'acierto' los que NO perdieron
+    usuarios_fallaron = []
     for sel in selecciones_jornada.data:
         if sel.get('estatus') == 'fallo':
             continue
-        nombre_equipo = sel.get('equipos_ligamx', {}).get('nombre', '')
+        # Saltar selecciones sin equipo_id (usuarios que no seleccionaron)
+        if sel.get('equipo_id') is None:
+            continue
+        equipos_ligamx = sel.get('equipos_ligamx')
+        nombre_equipo = equipos_ligamx.get('nombre', '') if equipos_ligamx else ''
         if nombre_equipo and nombre_equipo not in equipos_que_perdieron:
             supabase.table("selecciones") \
                 .update({"estatus": "acierto"}) \
                 .eq("user_id", sel['user_id']) \
                 .eq("jornada", jornada) \
                 .execute()
-            print(f"  Usuario {sel['user_id']} acertó con {nombre_equipo}")
+            print(f"  {usuarios_por_id[sel['user_id']]} acertó con {nombre_equipo}")
 
     # 7. Restar vidas a los que eligieron equipos perdedores
+    usuarios_fallaron = []
     for nombre_equipo in equipos_que_perdieron:
         res_equipo = supabase.table("equipos_ligamx") \
             .select("id") \
@@ -467,9 +483,12 @@ def actualizar_vidas(jornada_especifica=None):
                 .eq("jornada", jornada) \
                 .execute()
 
-            print(f"  Usuario {u_id} perdió una vida por {nombre_equipo}. Vidas: {nuevas_vidas}")
+            usuarios_fallaron.append(usuarios_por_id[u_id])
+            print(f"  {usuarios_por_id[u_id]} perdió una vida por {nombre_equipo}. Vidas: {nuevas_vidas}")
 
     print(f"\nJornada {jornada} procesada correctamente.")
+    if usuarios_fallaron:
+        print(f"Usuarios que fallaron en esta jornada: {usuarios_fallaron}")
 
 
 if __name__ == "__main__":
