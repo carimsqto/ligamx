@@ -534,7 +534,7 @@
         if (cacheTemporada) {
             return cacheTemporada;
         }
-        var url = RENDER_URL + '/api/calendario-jornada';
+        var url = RENDER_URL + '/api/calendario-temporada';
         var response = await fetch(url);
         var data = await response.json();
         if (data.success) {
