@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liga MX Survivor</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 20px; background: #1a1a1a; color: white; }
+        .card { background: #2d2d2d; padding: 30px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width: 1200px; margin: auto; }
+        input, select { width: 100%; padding: 12px; margin: 10px 0; border-radius: 8px; border: none; box-sizing: border-box; }
+        input { background: #404040; color: white; }
+        button { padding: 12px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; }
+        .btn-full { width: 100%; margin: 10px 0; }
+        .btn-verde { background: #00c853; color: white; }
+        .btn-verde:hover { background: #00a042; }
+        .btn-gris { background: #555; color: white; }
+        .btn-gris:hover { background: #444; }
+        .vidas { font-size: 28px; color: #ff5252; margin: 20px 0; }
+        #game-section { display: none; }
+        .hidden { display: none; }
+        .tabla-container { width: 100%; overflow-x: auto; }
+        th, td { white-space: nowrap; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>&#127942; LIGA MX <br>SURVIVOR</h1>
+
+    <!-- LOGIN -->
+    <div id="auth-section">
+        <p>Ingresa para jugar</p>
+        <input type="email" id="email" placeholder="Correo electronico">
+        <input type="password" id="password" placeholder="Contrasena">
+        <button id="btn-login" class="btn-full btn-verde">ENTRAR / REGISTRARSE</button>
+    </div>
+
+    <!-- JUEGO -->
+    <div id="game-section">
+        <p>Bienvenido: <strong id="user-display"></strong></p>
+        <div class="vidas">Vidas: <span id="vidas-count">3</span> &#10084;&#65039;</div>
+        <hr>
+
+        <p>Elige tu equipo de la Jornada</p>
+        <p id="jornada-label" style="color:#aaa; margin:5px 0;">Detectando jornada...</p>
+        <select id="team-select">
+            <option value="">Cargando equipos...</option>
+        </select>
+        <button id="btn-save" class="btn-full btn-verde">CONFIRMAR EQUIPO</button>
+        <p id="feedback"></p>
+
+        <hr>
+        <h3>Panel de Supervivencia</h3>
+        <div class="tabla-container">
+            <table style="width:100%; border-collapse:collapse; color:white;">
+                <thead>
+                    <tr id="header-jornadas" style="background:#333;">
+                        <th style="padding:10px; border:1px solid #555;">Usuario</th>
+                        <th style="padding:10px; border:1px solid #555;">Vidas</th>
+                    </tr>
+                </thead>
+                <tbody id="cuerpo-survivor"></tbody>
+            </table>
+        </div>
+
+        <hr style="margin:30px 0;">
+        <h3>&#128197; Partidos Liga MX</h3>
+        <div style="display:flex; gap:10px; justify-content:center; margin-bottom:15px; flex-wrap:wrap;">
+            <button id="btn-pasados" class="btn-gris" onclick="verSemana('pasados')" style="padding:8px 20px;">Semana pasada</button>
+            <button id="btn-proximos" class="btn-verde" onclick="verSemana('proximos')" style="padding:8px 20px;">Esta semana</button>
+            <button id="btn-siguiente" class="btn-gris" onclick="verSemana('siguiente')" style="padding:8px 20px;">Próxima semana</button>
+        </div>
+        <div id="seccion-calendario">
+            <p style="color:#aaa;">Cargando partidos...</p>
+        </div>
+
+        <!-- SECCIÓN ADMIN - solo visible para administrador -->
+        <div id="admin-section" style="display:none; margin-top:30px; border-top: 2px solid #ff5252; padding-top:20px;">
+            <h3 style="color:#ff5252;">⚙️ Panel Admin</h3>
+            <p style="color:#aaa; font-size:13px;">Ejecuta el verificador manualmente cuando una jornada ya terminó.</p>
+            <button id="btn-verificar" class="btn-full" style="background:#ff5252; color:white; margin-bottom:10px;"
+                onclick="correrVerificador()">
+                ▶ CORRER VERIFICADOR AHORA
+            </button>
+            <p id="admin-feedback" style="color:#aaa;"></p>
+
+            <hr style="margin:15px 0; border-color:#555;">
+            <p style="color:#aaa; font-size:13px; margin-bottom:8px;">Borrar selección incorrecta de un usuario:</p>
+            <select id="admin-usuario-select" style="background:#404040; color:white; margin-bottom:8px;">
+                <option value="">Selecciona usuario...</option>
+            </select>
+            <select id="admin-jornada-select" style="background:#404040; color:white; margin-bottom:8px;">
+                <option value="">Selecciona jornada...</option>
+            </select>
+            <p id="admin-seleccion-info" style="color:#aaa; font-size:13px; min-height:20px;"></p>
+            <button class="btn-full" style="background:#e65100; color:white; margin-bottom:10px;"
+                onclick="borrarSeleccion()">
+                🗑 BORRAR SELECCIÓN
+            </button>
+            <p id="admin-borrar-feedback" style="color:#aaa;"></p>
+
+            </div>
+
+        <hr style="margin:30px 0;">
+        <h3>Equipos Disponibles</h3>
+        <div id="equipos-pendientes-section" style="margin: 20px 0;">
+            <p style="color:#aaa; margin-bottom:10px;">Equipos que aún no has seleccionado:</p>
+            <div id="tabla-equipos-pendientes" class="tabla-container">
+                <p style="color:#aaa;">Cargando equipos disponibles...</p>
+            </div>
+        </div>
+
+        <!-- SECCIÓN RESET TORNEO - solo visible para administrador -->
+        <div id="reset-torneo-section" style="display:none; margin-top:30px; border-top: 2px solid #d32f2f; padding-top:20px;">
+            <h3 style="color:#d32f2f;">⚠️ Panel de Reset del Torneo</h3>
+            <p style="color:#aaa; font-size:13px; margin-bottom:15px;">ADVERTENCIA: Esta acción borrará todos los datos del torneo excepto tu cuenta de admin.</p>
+            <button class="btn-full" style="background:#d32f2f; color:white; margin-bottom:10px;"
+                onclick="resetearTorneo()">
+                🔄 RESETEAR TORNEO COMPLETO (BORRAR TODO)
+            </button>
+            <p id="admin-reset-feedback" style="color:#aaa;"></p>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    const SB_URL = "https://povaakggggoeewgqfyot.supabase.co";
+    const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBvdmFha2dnZ2dvZWV3Z3FmeW90Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIxMjMzODMsImV4cCI6MjA4NzY5OTM4M30.HqtFd95Ot8P3DxjgGLIz40SuxBPJiB-9DavvcCSInHA";
+    const RENDER_URL = "https://ligamx-pjcd.onrender.com";
+
+    const supabaseClient = supabase.createClient(SB_URL, SB_KEY);
+    let userActual = null;
+    let vistaCalendario = 'proximos';
+
+    // LOGIN
+    document.getElementById('btn-login').onclick = async () => {
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const btn = document.getElementById('btn-login');
+
+        if (!email || !password) { alert("Escribe correo y contrasena"); return; }
+
+        btn.disabled = true;
+        btn.innerText = "Cargando...";
+
+        try {
+            let { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+            if (error) {
+                // Si falla el login, intentamos registro con backend (reintentos y mensaje amigable)
+                const registerResp = await fetch(RENDER_URL + '/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                const registerData = await registerResp.json();
+
+                if (!registerResp.ok || !registerData.success) {
+                    alert(registerData.error || "No se pudo registrar en este momento.");
+                    return;
+                }
+
+                alert("Cuenta creada. Presiona Entrar de nuevo.");
+                return;
+            } else {
+                userActual = data.user;
+            }
+
+            iniciarJuego();
+
+        } catch (e) {
+            alert("Error: " + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "ENTRAR / REGISTRARSE";
+        }
+    };
+
+    // INICIAR JUEGO
+    async function iniciarJuego() {
+        document.getElementById('auth-section').classList.add('hidden');
+        document.getElementById('game-section').style.display = 'block';
+        document.getElementById('user-display').innerText = userActual.email;
+
+        // Crear perfil si no existe
+        const { data: perfilExiste } = await supabaseClient
+            .from('perfiles').select('id').eq('id', userActual.id).single();
+
+        if (!perfilExiste) {
+            await supabaseClient.from('perfiles').insert([{
+                id: userActual.id,
+                username: userActual.email,
+                vidas: 3,
+                eliminado: false
+            }]);
+        }
+
+        // Cargar vidas y verificar estado del jugador
+        const { data: perfil } = await supabaseClient
+            .from('perfiles').select('vidas, eliminado').eq('id', userActual.id).single();
+        
+        if (perfil) {
+            document.getElementById('vidas-count').innerText = perfil.vidas;
+            
+            // Verificar si el usuario está eliminado o no tiene vidas
+            if (perfil.vidas <= 0 || perfil.eliminado) {
+                // Mostrar mensaje de eliminado
+                const feedback = document.getElementById('feedback');
+                feedback.innerText = '¡HAS SIDO ELIMINADO! Ya no puedes seleccionar equipos. Revisa la tabla para ver los resultados.';
+                feedback.style.color = '#ff5252';
+                feedback.style.fontWeight = 'bold';
+                feedback.style.fontSize = '16px';
+                
+                // Bloquear selección de equipos
+                const btnGuardar = document.getElementById('btn-save');
+                const selectEquipos = document.getElementById('team-select');
+                
+                btnGuardar.disabled = true;
+                btnGuardar.style.background = '#555';
+                btnGuardar.style.cursor = 'not-allowed';
+                btnGuardar.innerText = 'ELIMINADO - NO PUEDES SELECCIONAR';
+                
+                selectEquipos.disabled = true;
+                selectEquipos.style.background = '#333';
+                selectEquipos.innerHTML = '<option value="">ELIMINADO - SIN VIDAS</option>';
+                
+                // Cambiar color de vidas a rojo
+                document.getElementById('vidas-count').style.color = '#ff5252';
+                
+                console.log('Usuario eliminado - selección bloqueada');
+                return; // No continuar cargando equipos
+            }
+        }
+
+        // Cargar equipos (solo si tiene vidas)
+        const { data: equipos } = await supabaseClient.from('equipos_ligamx').select('*');
+        const select = document.getElementById('team-select');
+        select.innerHTML = equipos.map(e => "<option value='" + e.id + "'>" + e.nombre + "</option>").join('');
+
+        cargarTablaGlobal();
+        cargarCalendario();
+        detectarJornadaSiguiente();
+        mostrarAdminSiAplica();
+        
+        // Cargar equipos pendientes después de que todo esté inicializado
+        setTimeout(() => {
+            cargarEquiposPendientes();
+        }, 1000);
+    }
+
+    // EQUIPOS PENDIENTES
+    async function cargarEquiposPendientes() {
+        if (!userActual) return;
+
+        try {
+            // Verificar si el usuario está eliminado
+            const { data: perfilActual } = await supabaseClient
+                .from('perfiles')
+                .select('vidas, eliminado')
+                .eq('id', userActual.id)
+                .single();
+
+            if (!perfilActual || perfilActual.vidas <= 0 || perfilActual.eliminado) {
+                document.getElementById('tabla-equipos-pendientes').innerHTML = 
+                    '<p style="color:#ff5252; font-weight:bold;">ELIMINADO - Ya no puedes participar en el juego</p>';
+                return;
+            }
+            console.log('Cargando equipos pendientes para usuario:', userActual.id);
+            
+            // Obtener todos los equipos
+            const { data: todosEquipos } = await supabaseClient
+                .from('equipos_ligamx')
+                .select('id, nombre')
+                .order('nombre');
+
+            console.log('Todos los equipos:', todosEquipos?.length || 0);
+
+            // Obtener selecciones del usuario en todas las jornadas
+            const { data: seleccionesUsuario } = await supabaseClient
+                .from('selecciones')
+                .select('equipo_id')
+                .eq('user_id', userActual.id)
+                .neq('estatus', 'fallo');
+
+            console.log('Selecciones del usuario:', seleccionesUsuario?.length || 0);
+
+            // IDs de equipos ya usados
+            const equiposUsadosIds = new Set(
+                seleccionesUsuario.map(s => s.equipo_id).filter(id => id)
+            );
+
+            console.log('Equipos usados IDs:', Array.from(equiposUsadosIds));
+
+            // Filtrar equipos no usados
+            const equiposDisponibles = todosEquipos.filter(
+                equipo => !equiposUsadosIds.has(equipo.id)
+            );
+
+            console.log('Equipos disponibles:', equiposDisponibles.length);
+
+            const divTabla = document.getElementById('tabla-equipos-pendientes');
+            
+            if (equiposDisponibles.length === 0) {
+                divTabla.innerHTML = '<p style="color:#00c853;">¡Ya has usado todos los equipos disponibles!</p>';
+                return;
+            }
+
+            // Crear tabla
+            let html = '<table style="width:100%; border-collapse:collapse; color:white;">'
+                     + '<thead><tr style="background:#333;">'
+                     + '<th style="padding:8px; border:1px solid #555;">#</th>'
+                     + '<th style="padding:8px; border:1px solid #555;">Equipo</th>'
+                     + '</tr></thead><tbody>';
+
+            equiposDisponibles.forEach((equipo, index) => {
+                html += '<tr>'
+                      + '<td style="padding:8px; border:1px solid #555; text-align:center;">' + (index + 1) + '</td>'
+                      + '<td style="padding:8px; border:1px solid #555;">' + equipo.nombre + '</td>'
+                      + '</tr>';
+            });
+
+            html += '</tbody></table>';
+            divTabla.innerHTML = html;
+
+        } catch (error) {
+            console.error('Error al cargar equipos pendientes:', error);
+            document.getElementById('tabla-equipos-pendientes').innerHTML = 
+                '<p style="color:#ff5252;">Error al cargar equipos disponibles</p>';
+        }
+    }
+
+    // JORNADA SIGUIENTE - se detecta automáticamente
+    var jornadaSiguiente = null;
+
+    async function detectarJornadaSiguiente() {
+        var roundActual = await detectarRoundActual();
+        jornadaSiguiente = roundActual;
+
+        var label = document.getElementById('jornada-label');
+        var btnSave = document.getElementById('btn-save');
+        var fb = document.getElementById('feedback');
+
+        label.innerText = 'Jornada ' + jornadaSiguiente + ' - Apertura 2026';
+        label.style.color = '#00c853';
+        label.style.fontWeight = 'bold';
+        label.style.fontSize = '18px';
+
+        // Verificar si el usuario tiene vidas antes de continuar
+        var { data: perfilActual } = await supabaseClient
+            .from('perfiles')
+            .select('vidas, eliminado')
+            .eq('id', userActual.id)
+            .single();
+
+        if (!perfilActual || perfilActual.vidas <= 0 || perfilActual.eliminado) {
+            // Usuario eliminado - mostrar mensaje y bloquear
+            fb.innerText = '¡HAS SIDO ELIMINADO! Ya no puedes seleccionar equipos. Revisa la tabla para ver los resultados.';
+            fb.style.color = '#ff5252';
+            fb.style.fontWeight = 'bold';
+            fb.style.fontSize = '16px';
+            
+            btnSave.disabled = true;
+            btnSave.style.background = '#555';
+            btnSave.style.cursor = 'not-allowed';
+            btnSave.innerText = 'ELIMINADO - NO PUEDES SELECCIONAR';
+            
+            document.getElementById('team-select').disabled = true;
+            document.getElementById('team-select').style.background = '#333';
+            document.getElementById('team-select').innerHTML = '<option value="">ELIMINADO - SIN VIDAS</option>';
+            
+            return; // No continuar verificando selecciones
+        }
+
+        // Verificar si ya eligió para esta jornada
+        var { data: yaExiste } = await supabaseClient
+            .from('selecciones')
+            .select('id, equipos_ligamx(nombre)')
+            .eq('user_id', userActual.id)
+            .eq('jornada', jornadaSiguiente)
+            .single();
+
+        if (yaExiste) {
+            var nombreEquipo = yaExiste.equipos_ligamx ? yaExiste.equipos_ligamx.nombre : 'tu equipo';
+            fb.innerText = 'Ya elegiste ' + nombreEquipo + ' para la Jornada ' + jornadaSiguiente + '.';
+            fb.style.color = '#aaa';
+            btnSave.disabled = true;
+            btnSave.style.background = '#555';
+            btnSave.style.cursor = 'not-allowed';
+            document.getElementById('team-select').disabled = true;
+        } else {
+            btnSave.disabled = false;
+            btnSave.style.background = '#00c853';
+            btnSave.style.cursor = 'pointer';
+            document.getElementById('team-select').disabled = false;
+        }
+        
+        // Cargar equipos pendientes aquí también
+        cargarEquiposPendientes();
+    }
+
+    // GUARDAR SELECCION
+    document.getElementById('btn-save').onclick = async () => {
+        const eqId = document.getElementById('team-select').value;
+
+        if (!jornadaSiguiente) { alert("Espera, detectando jornada..."); return; }
+        if (!eqId) { alert("Selecciona un equipo"); return; }
+
+        // Verificación final de vidas (doble seguridad)
+        const { data: perfilFinal } = await supabaseClient
+            .from('perfiles')
+            .select('vidas, eliminado')
+            .eq('id', userActual.id)
+            .single();
+
+        if (!perfilFinal || perfilFinal.vidas <= 0 || perfilFinal.eliminado) {
+            alert("¡HAS SIDO ELIMINADO! Ya no puedes seleccionar equipos.");
+            return;
+        }
+
+        // Verificar si ya usó este equipo en una jornada anterior
+        const { data: equipoRepetido } = await supabaseClient
+            .from('selecciones')
+            .select('jornada')
+            .eq('user_id', userActual.id)
+            .eq('equipo_id', eqId)
+            .single();
+
+        if (equipoRepetido) {
+            const fb = document.getElementById('feedback');
+            fb.innerText = "Ya usaste ese equipo en la Jornada " + equipoRepetido.jornada + ". Elige otro.";
+            fb.style.color = "#ff5252";
+            return;
+        }
+
+        const { error } = await supabaseClient.from('selecciones').insert([{
+            user_id: userActual.id,
+            equipo_id: eqId,
+            jornada: jornadaSiguiente,
+            estatus: 'pendiente'
+        }]);
+
+        if (error) {
+            alert("ERROR: " + error.message + " | " + error.details);
+        } else {
+            const fb = document.getElementById('feedback');
+            fb.innerText = "Eleccion guardada para la Jornada " + jornadaSiguiente + "!";
+            fb.style.color = "#00c853";
+            // Bloquear el botón después de guardar
+            document.getElementById('btn-save').disabled = true;
+            document.getElementById('btn-save').style.background = '#555';
+            document.getElementById('btn-save').style.cursor = 'not-allowed';
+            document.getElementById('team-select').disabled = true;
+            cargarTablaGlobal();
+            cargarEquiposPendientes();
+        }
+    };
+
+    // TABLA GLOBAL
+    async function cargarTablaGlobal() {
+        const { data: perfiles } = await supabaseClient
+            .from('perfiles').select('id, username, vidas').order('vidas', { ascending: false });
+        const { data: selecciones } = await supabaseClient
+            .from('selecciones').select('*, equipos_ligamx(nombre)');
+
+        const cuerpo = document.getElementById('cuerpo-survivor');
+        const header = document.getElementById('header-jornadas');
+        const maxJornada = 17;
+
+        header.innerHTML = '<th style="padding:10px; border:1px solid #555;">Usuario</th>'
+                         + '<th style="padding:10px; border:1px solid #555;">Vidas</th>';
+        for (let i = 1; i <= maxJornada; i++) {
+            header.innerHTML += '<th style="padding:10px; border:1px solid #555;">J' + i + '</th>';
+        }
+
+        cuerpo.innerHTML = perfiles.map(function(p) {
+            let celdas = '';
+            for (let j = 1; j <= maxJornada; j++) {
+                const sel = selecciones.find(function(s) { return s.user_id === p.id && s.jornada === j; });
+                let estilo = 'background:#444;';
+                let texto = '-';
+                if (sel) {
+                    texto = (sel.equipos_ligamx && sel.equipos_ligamx.nombre) ? sel.equipos_ligamx.nombre : 'S/N';
+                    if (sel.estatus === 'fallo')        estilo = 'background:#cc0000; color:white;';
+                    else if (sel.estatus === 'acierto') estilo = 'background:#008000; color:white;';
+                    else                                estilo = 'background:#555; color:#ccc;';
+                }
+                celdas += '<td style="padding:8px; border:1px solid #555; text-align:center; ' + estilo + '">' + texto + '</td>';
+            }
+            const colorVidas = p.vidas > 0 ? '#00c853' : '#ff5252';
+            return '<tr>'
+                + '<td style="padding:8px; border:1px solid #555; font-weight:bold;">' + (p.username || 'Anon') + '</td>'
+                + '<td style="padding:8px; border:1px solid #555; text-align:center; font-weight:bold; color:' + colorVidas + '">' + p.vidas + '</td>'
+                + celdas
+                + '</tr>';
+        }).join('');
+    }
+
+    // CALENDARIO
+    // TheSportsDB usa temporadas como "2026-2027" para Apertura 2026
+    // No filtramos por año ya que el torneo puede abarcar 2026 y 2027
+
+    // Caché por jornada individual (evita repetir llamadas si el usuario
+    // regresa a una jornada que ya consultó antes)
+    var cacheJornadas = {};
+
+    // NOTA: eventsseason.php (que usaba /api/calendario-temporada) se queda
+    // atrasado y a veces no trae todos los partidos de una jornada reciente.
+    // Por eso usamos /api/calendario-jornada/<round>, que llama a
+    // eventsround.php y sí trae el calendario completo y actualizado.
+    async function fetchJornada(round) {
+        if (cacheJornadas[round]) {
+            return cacheJornadas[round];
+        }
+        var url = RENDER_URL + '/api/calendario-jornada/' + round;
+        var response = await fetch(url);
+        var data = await response.json();
+        if (data.success) {
+            cacheJornadas[round] = data.partidos || [];
+            return cacheJornadas[round];
+        } else {
+            console.error('Error al cargar jornada ' + round + ':', data.error);
+            return [];
+        }
+    }
+
+    // fetchTemporadaCompleta se sigue usando solo para detectar en qué
+    // jornada vamos (detectarRoundActual), ya que ahí sí basta con saber
+    // qué rounds tienen partidos futuros, aunque falten uno o dos partidos.
+    var cacheTemporada = null;
+
+    async function fetchTemporadaCompleta() {
+        if (cacheTemporada) {
+            return cacheTemporada;
+        }
+        var url = RENDER_URL + '/api/calendario-temporada';
+        var response = await fetch(url);
+        var data = await response.json();
+        if (data.success) {
+            cacheTemporada = data.partidos || [];
+            return cacheTemporada;
+        } else {
+            console.error('Error al cargar temporada:', data.error);
+            return [];
+        }
+    }
+
+    // Detectar jornada actual buscando el round que tenga partidos
+    // y cuya fecha más reciente sea >= hoy GMT-6 (jornada próxima o actual)
+    async function detectarRoundActual() {
+        var ahoraUTC = new Date();
+        var roundActual = 1; // fallback: jornada 1 (inicio del torneo)
+        var todos = await fetchTemporadaCompleta();
+
+        if (todos.length === 0) {
+            return roundActual;
+        }
+
+        // Agrupar partidos por round
+        var porRound = {};
+        todos.forEach(function(e) {
+            var r = e.intRound;
+            if (!porRound[r]) porRound[r] = [];
+            porRound[r].push(e);
+        });
+
+        // Buscar el primer round con partidos futuros
+        for (var r = 1; r <= 17; r++) {
+            if (porRound[r] && porRound[r].length > 0) {
+                var algunoFuturo = porRound[r].some(function(e) {
+                    return new Date(e.strTimestamp) > ahoraUTC;
+                });
+                if (algunoFuturo) {
+                    roundActual = r;
+                    break;
+                }
+            }
+        }
+        return roundActual;
+    }
+
+    function renderTablaPartidos(eventos, titulo) {
+        if (eventos.length === 0) {
+            return '<p style="color:#aaa;">No hay partidos disponibles para ' + titulo + '.</p>';
+        }
+
+        eventos.sort(function(a, b) {
+            return new Date(a.strTimestamp) - new Date(b.strTimestamp);
+        });
+
+        var html = '<p style="color:#aaa; margin-bottom:8px; font-weight:bold;">' + titulo + '</p>'
+                 + '<div class="tabla-container"><table style="width:100%; border-collapse:collapse; color:white;">'
+                 + '<thead><tr style="background:#333;">'
+                 + '<th style="padding:8px; border:1px solid #555;">Fecha</th>'
+                 + '<th style="padding:8px; border:1px solid #555;">Local</th>'
+                 + '<th style="padding:8px; border:1px solid #555;">Marcador</th>'
+                 + '<th style="padding:8px; border:1px solid #555;">Visitante</th>'
+                 + '</tr></thead><tbody>';
+
+        eventos.forEach(function(p) {
+            // strTimestamp viene en UTC, México siempre es GMT-6 (no cambia horario)
+            var fechaUTC = new Date(p.strTimestamp + 'Z');
+            var fechaGMT6 = new Date(fechaUTC.getTime() - 6 * 60 * 60 * 1000);
+
+            var dias  = ['dom','lun','mar','mié','jue','vie','sáb'];
+            var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+            var dia    = dias[fechaGMT6.getUTCDay()];
+            var numDia = fechaGMT6.getUTCDate();
+            var mes    = meses[fechaGMT6.getUTCMonth()];
+            var hh     = String(fechaGMT6.getUTCHours()).padStart(2,'0');
+            var mm     = String(fechaGMT6.getUTCMinutes()).padStart(2,'0');
+            var hora   = hh + ':' + mm;
+            var fecha  = dia + ' ' + numDia + ' ' + mes + ', ' + hora;
+
+            var local  = p.strHomeTeam;
+            var visita = p.strAwayTeam;
+            var marcador;
+            if (p.intHomeScore !== null && p.intHomeScore !== '' && p.intHomeScore !== undefined) {
+                marcador = '<strong>' + p.intHomeScore + ' - ' + p.intAwayScore + '</strong>';
+            } else {
+                marcador = '<span style="color:#aaa;">' + hora + '</span>';
+            }
+
+            html += '<tr>'
+                  + '<td style="padding:8px; border:1px solid #555; font-size:13px;">' + fecha + '</td>'
+                  + '<td style="padding:8px; border:1px solid #555;">' + local + '</td>'
+                  + '<td style="padding:8px; border:1px solid #555; text-align:center;">' + marcador + '</td>'
+                  + '<td style="padding:8px; border:1px solid #555;">' + visita + '</td>'
+                  + '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    async function cargarCalendario() {
+        var div = document.getElementById('seccion-calendario');
+        div.innerHTML = '<p style="color:#aaa;">Cargando...</p>';
+
+        try {
+            var roundActual = await detectarRoundActual();
+            var round;
+            if (vistaCalendario === 'pasados')   round = roundActual - 1;
+            else if (vistaCalendario === 'proximos') round = roundActual;
+            else round = roundActual + 1; // siguiente
+
+            var titulo = 'Jornada ' + round + ' - Apertura 2026';
+            var eventos = await fetchJornada(round);
+            div.innerHTML = renderTablaPartidos(eventos, titulo);
+
+        } catch (e) {
+            div.innerHTML = '<p style="color:#ff5252;">Error: ' + e.message + '</p>';
+            console.error(e);
+        }
+    }
+
+    // ADMIN
+    const ADMIN_EMAIL = 'greenday_115@hotmail.com';
+    const RENDER_URL_VERIFICADOR = 'https://ligamx-pjcd.onrender.com/api/verificar';
+
+    function mostrarAdminSiAplica() {
+        if (userActual && userActual.email === ADMIN_EMAIL) {
+            document.getElementById('admin-section').style.display = 'block';
+            document.getElementById('reset-torneo-section').style.display = 'block';
+            cargarUsuariosAdmin();
+        }
+    }
+
+    async function cargarUsuariosAdmin() {
+        var { data: perfiles } = await supabaseClient
+            .from('perfiles')
+            .select('id, username')
+            .order('username');
+
+        var select = document.getElementById('admin-usuario-select');
+        select.innerHTML = '<option value="">Selecciona usuario...</option>';
+        perfiles.forEach(function(p) {
+            select.innerHTML += '<option value="' + p.id + '">' + (p.username || p.id) + '</option>';
+        });
+
+        // Al cambiar usuario cargar sus jornadas
+        select.onchange = function() {
+            cargarJornadasAdmin(this.value);
+        };
+    }
+
+    async function cargarJornadasAdmin(userId) {
+        var selectJornada = document.getElementById('admin-jornada-select');
+        var info = document.getElementById('admin-seleccion-info');
+        selectJornada.innerHTML = '<option value="">Selecciona jornada...</option>';
+        info.innerText = '';
+
+        if (!userId) return;
+
+        var { data: selecciones } = await supabaseClient
+            .from('selecciones')
+            .select('jornada, estatus, equipos_ligamx(nombre)')
+            .eq('user_id', userId)
+            .order('jornada');
+
+        if (!selecciones || selecciones.length === 0) {
+            selectJornada.innerHTML = '<option value="">Sin selecciones</option>';
+            return;
+        }
+
+        selecciones.forEach(function(s) {
+            var equipo = s.equipos_ligamx ? s.equipos_ligamx.nombre : 'Sin equipo';
+            selectJornada.innerHTML += '<option value="' + s.jornada + '">J' + s.jornada + ' - ' + equipo + ' (' + s.estatus + ')</option>';
+        });
+
+        selectJornada.onchange = function() {
+            var sel = selecciones.find(function(s) { return s.jornada == selectJornada.value; });
+            if (sel) {
+                var equipo = sel.equipos_ligamx ? sel.equipos_ligamx.nombre : 'Sin equipo';
+                info.innerText = 'Selección: ' + equipo + ' - Estatus: ' + sel.estatus;
+                info.style.color = sel.estatus === 'fallo' ? '#ff5252' : sel.estatus === 'acierto' ? '#00c853' : '#aaa';
+            }
+        };
+    }
+
+    async function borrarSeleccion() {
+        var userId  = document.getElementById('admin-usuario-select').value;
+        var jornada = document.getElementById('admin-jornada-select').value;
+        var fb      = document.getElementById('admin-borrar-feedback');
+
+        if (!userId || !jornada) {
+            fb.innerText = 'Selecciona usuario y jornada.';
+            fb.style.color = '#ff5252';
+            return;
+        }
+
+        if (!confirm('¿Seguro que quieres borrar esta selección?')) return;
+
+        try {
+            // Llamar al endpoint seguro del backend
+            var response = await fetch(RENDER_URL + '/api/admin/delete-seleccion', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (await supabaseClient.auth.getSession()).data.session?.access_token
+                },
+                body: JSON.stringify({
+                    userId: userId,
+                    jornada: jornada
+                })
+            });
+
+            var data = await response.json();
+
+            if (data.error) {
+                fb.innerText = 'Error: ' + data.error;
+                fb.style.color = '#ff5252';
+            } else {
+                fb.innerText = '✅ Selección borrada correctamente.';
+                fb.style.color = '#00c853';
+                cargarJornadasAdmin(userId);
+                cargarTablaGlobal();
+            }
+        } catch (e) {
+            fb.innerText = 'Error de conexión: ' + e.message;
+            fb.style.color = '#ff5252';
+        }
+    }
+
+    async function correrVerificador() {
+        var btn = document.getElementById('btn-verificar');
+        var fb  = document.getElementById('admin-feedback');
+
+        btn.disabled = true;
+        btn.innerText = 'Ejecutando...';
+        fb.innerText = 'Conectando con el servidor...';
+        fb.style.color = '#aaa';
+
+        try {
+            var response = await fetch(RENDER_URL_VERIFICADOR, { method: 'POST' });
+            var data = await response.json();
+
+            if (data.success) {
+                fb.innerText = '✅ ' + (data.mensaje || 'Verificacion completada.');
+                fb.style.color = '#00c853';
+                cargarTablaGlobal(); // Refrescar tabla con nuevas vidas
+            } else {
+                fb.innerText = '❌ Error: ' + (data.error || 'Error desconocido');
+                fb.style.color = '#ff5252';
+            }
+        } catch (e) {
+            fb.innerText = '❌ No se pudo conectar con el servidor: ' + e.message;
+            fb.style.color = '#ff5252';
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '▶ CORRER VERIFICADOR AHORA';
+        }
+    }
+
+    async function resetearTorneo() {
+        var fb = document.getElementById('admin-reset-feedback');
+        
+        if (!confirm('⚠️ ESTÁS A PUNTO DE BORRAR TODOS LOS DATOS DEL TORNEO\n\nEsta acción:\n- Borrará todas las selecciones\n- Borrará todos los resultados\n- Borrará todas las jornadas\n- Borrará todos los equipos\n- Borrará todos los usuarios EXCEPTO el admin\n\n¿ESTÁS SEGURO?')) {
+            return;
+        }
+
+        if (!confirm('ÚLTIMA ADVERTENCIA\n\nEsta acción no se puede deshacer.\n¿Confirmas que quieres resetear el torneo completo?')) {
+            return;
+        }
+
+        try {
+            fb.innerText = 'Conectando con el servidor...';
+            fb.style.color = '#ffa726';
+
+            var response = await fetch(RENDER_URL + '/api/admin/reset-tournament', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (await supabaseClient.auth.getSession()).data.session?.access_token
+                }
+            });
+
+            var data = await response.json();
+
+            if (data.error) {
+                fb.innerText = '❌ Error: ' + data.error;
+                fb.style.color = '#ff5252';
+            } else if (data.success) {
+                fb.innerText = '✅ Torneo reseteado correctamente. Tablas borradas: ' + Object.keys(data.resultados).join(', ');
+                fb.style.color = '#00c853';
+                
+                // Recargar la página después de 2 segundos
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                fb.innerText = '❌ Respuesta inesperada del servidor';
+                fb.style.color = '#ff5252';
+            }
+        } catch (e) {
+            fb.innerText = '❌ Error de conexión: ' + e.message;
+            fb.style.color = '#ff5252';
+        }
+    }
+
+    function verSemana(tipo) {
+        vistaCalendario = tipo;
+        document.getElementById('btn-proximos').className  = tipo === 'proximos'  ? 'btn-verde' : 'btn-gris';
+        document.getElementById('btn-pasados').className   = tipo === 'pasados'   ? 'btn-verde' : 'btn-gris';
+        document.getElementById('btn-siguiente').className = tipo === 'siguiente' ? 'btn-verde' : 'btn-gris';
+        cargarCalendario();
+    }
+
+</script>
+</body>
+</html>
