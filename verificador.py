@@ -20,7 +20,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BASE_URL = "https://www.thesportsdb.com/api/v1/json/123"
 LIGA_MX_ID = "4350"
 
-# Overrides manuales para nombres cortos/alias que la API regresa a veces
+# Overrides manuales para nombres cortos/alias que la API regresa a veces.
 # (clave = como llega de la API, valor = nombre EXACTO en la tabla equipos_ligamx)
 NORMALIZAR_NOMBRES = {
     'Mazatlán':             'Mazatlan',

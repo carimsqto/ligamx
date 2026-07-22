@@ -10,7 +10,7 @@ from supabase import create_client, Client
 app = Flask(__name__)
 CORS(app)  # Permitir llamadas desde el frontend
 
-# Configuración Supabase con SERVICE ROLE KEY
+# Configuración Supabase con SERVICE ROLE KEY.
 # Estas dos llaves YA NO están escritas aquí. Se leen desde variables de entorno
 # que configuras en Render (Settings -> Environment). Si por alguna razón no
 # existen (por ejemplo corriendo en tu compu sin configurarlas), el programa
