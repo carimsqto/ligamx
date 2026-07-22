@@ -1,4 +1,6 @@
 import os
+import sys
+import argparse
 import unicodedata
 import difflib
 import requests
@@ -92,20 +94,91 @@ def normalizar_nombre(nombre):
     return nombre
 
 
-def obtener_jornada_mas_reciente():
+def obtener_jornada_mas_reciente(jornada_especifica=None):
     """
     Busca la jornada más reciente que tenga partidos terminados en 2026
     y que aún tenga selecciones pendientes en la base de datos.
     Así evitamos procesar dos veces la misma jornada.
+
+    Si se proporciona jornada_especifica, usa esa jornada en lugar de buscar automáticamente.
     """
+    # Si se proporcionó una jornada específica, usarla directamente
+    if jornada_especifica:
+        print(f"Procesando jornada específica: {jornada_especifica}")
+        jornada = int(jornada_especifica)
+        url = f"{BASE_URL}/eventsround.php?id={LIGA_MX_ID}&r={jornada}&s=2026-2027"
+        try:
+            response = requests.get(url, timeout=10)
+            eventos = response.json().get('events', []) or []
+        except Exception as e:
+            print(f"  Error al consultar jornada {jornada}: {e}")
+            return None
+
+        # Filtrar solo partidos de 2026
+        eventos_2026 = [e for e in eventos if e.get('dateEvent', '').startswith('2026')]
+
+        if not eventos_2026:
+            print(f"  Jornada {jornada}: sin partidos de 2026.")
+            return None
+
+        print(f"  Jornada {jornada}: {len(eventos_2026)} partidos encontrados")
+        return jornada, eventos_2026
+
     # Buscar selecciones pendientes y agrupar por jornada
     selecciones = supabase.table("selecciones") \
         .select("jornada") \
         .eq("estatus", "pendiente") \
         .execute()
 
+    # Obtener todas las jornadas que ya tienen selecciones (cualquier estatus)
+    todas_selecciones = supabase.table("selecciones") \
+        .select("jornada") \
+        .execute()
+
+    jornadas_con_selecciones = set(s['jornada'] for s in todas_selecciones.data) if todas_selecciones.data else set()
+    print(f"Jornadas con selecciones: {sorted(jornadas_con_selecciones)}")
+
     if not selecciones.data:
         print("No hay selecciones pendientes que procesar.")
+        # Si no hay selecciones pendientes, buscar jornadas sin selecciones que ya terminaron
+        print("Buscando jornadas sin selecciones que ya terminaron...")
+        jornadas_sin_seleccion = []
+        for jornada in range(1, 18):  # Jornadas 1-17
+            if jornada not in jornadas_con_selecciones:
+                jornadas_sin_seleccion.append(jornada)
+
+        if not jornadas_sin_seleccion:
+            print("No hay jornadas sin selecciones.")
+            return None
+
+        # Revisar cada jornada sin selección y ver si ya terminaron sus partidos
+        for jornada in jornadas_sin_seleccion:
+            print(f"Revisando jornada {jornada} (sin selecciones)...")
+            url = f"{BASE_URL}/eventsround.php?id={LIGA_MX_ID}&r={jornada}&s=2026-2027"
+            try:
+                response = requests.get(url, timeout=10)
+                eventos = response.json().get('events', []) or []
+            except Exception as e:
+                print(f"  Error al consultar jornada {jornada}: {e}")
+                continue
+
+            # Filtrar solo partidos de 2026
+            eventos_2026 = [e for e in eventos if e.get('dateEvent', '').startswith('2026')]
+
+            if not eventos_2026:
+                print(f"  Jornada {jornada}: sin partidos de 2026, saltando.")
+                continue
+
+            # Verificar si todos los partidos de la jornada ya terminaron
+            terminados = [e for e in eventos_2026 if e.get('intHomeScore') not in (None, '')]
+
+            if len(terminados) == len(eventos_2026) and len(terminados) > 0:
+                print(f"  Jornada {jornada}: todos los partidos terminados ({len(terminados)}/{len(eventos_2026)})")
+                return jornada, eventos_2026
+            else:
+                print(f"  Jornada {jornada}: {len(terminados)}/{len(eventos_2026)} partidos terminados, aún no se procesa.")
+
+        print("Ninguna jornada sin selección tiene todos los partidos terminados.")
         return None
 
     # Obtener jornadas únicas pendientes ordenadas de menor a mayor
@@ -259,13 +332,13 @@ def obtener_perdedores_de_jornada(eventos):
     print("\n" + "=" * 60)
 
 
-def actualizar_vidas():
+def actualizar_vidas(jornada_especifica=None):
     print("=" * 50)
     print("Iniciando verificación de jornada...")
     print("=" * 50)
 
     # 1. Buscar la jornada más reciente con partidos terminados y selecciones pendientes
-    resultado = obtener_jornada_mas_reciente()
+    resultado = obtener_jornada_mas_reciente(jornada_especifica)
 
     if not resultado:
         print("No hay jornadas listas para procesar.")
@@ -281,18 +354,32 @@ def actualizar_vidas():
         .execute()
     todos_user_ids = set(p['id'] for p in todos_perfiles.data)
 
-    # 3. Obtener usuarios que SÍ escogieron en esta jornada
+    # 3. Obtener usuarios que SÍ escogieron en esta jornada (con equipo_id válido)
     selecciones_jornada = supabase.table("selecciones") \
         .select("user_id, equipo_id, equipos_ligamx(nombre)") \
         .eq("jornada", jornada) \
         .execute()
-    users_con_seleccion = set(s['user_id'] for s in selecciones_jornada.data)
+    # Solo considerar usuarios que tienen un equipo_id válido (no null)
+    users_con_seleccion = set(s['user_id'] for s in selecciones_jornada.data if s['equipo_id'] is not None)
 
     # 4. Penalizar usuarios que NO escogieron equipo
     users_sin_seleccion = todos_user_ids - users_con_seleccion
     for u_id in users_sin_seleccion:
         perfil = next(p for p in todos_perfiles.data if p['id'] == u_id)
         vidas_actuales = perfil['vidas']
+
+        # Verificar si ya tiene un registro de fallo para esta jornada (evitar duplicados)
+        fallo_existente = supabase.table("selecciones") \
+            .select("id") \
+            .eq("user_id", u_id) \
+            .eq("jornada", jornada) \
+            .eq("estatus", "fallo") \
+            .execute()
+
+        if fallo_existente.data:
+            print(f"  Usuario {u_id} ya tiene registro de fallo para jornada {jornada}, saltando...")
+            continue
+
         nuevas_vidas = max(0, vidas_actuales - 1)
 
         supabase.table("perfiles").update({
@@ -386,4 +473,8 @@ def actualizar_vidas():
 
 
 if __name__ == "__main__":
-    actualizar_vidas()
+    parser = argparse.ArgumentParser(description='Verificador de jornadas Liga MX Survivor')
+    parser.add_argument('--jornada', type=int, help='Número de jornada específica a verificar (1-17)')
+    args = parser.parse_args()
+
+    actualizar_vidas(args.jornada)

@@ -79,6 +79,9 @@
         <div id="admin-section" style="display:none; margin-top:30px; border-top: 2px solid #ff5252; padding-top:20px;">
             <h3 style="color:#ff5252;">⚙️ Panel Admin</h3>
             <p style="color:#aaa; font-size:13px;">Ejecuta el verificador manualmente cuando una jornada ya terminó.</p>
+            <select id="verificar-jornada-select" style="background:#404040; color:white; margin-bottom:8px;">
+                <option value="">Automático (jornada más reciente)</option>
+            </select>
             <button id="btn-verificar" class="btn-full" style="background:#ff5252; color:white; margin-bottom:10px;"
                 onclick="correrVerificador()">
                 ▶ CORRER VERIFICADOR AHORA
@@ -177,6 +180,13 @@
             btn.innerText = "ENTRAR / REGISTRARSE";
         }
     };
+
+    // Habilitar Enter para login
+    document.getElementById('password').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            document.getElementById('btn-login').click();
+        }
+    });
 
     // INICIAR JUEGO
     async function iniciarJuego() {
@@ -390,10 +400,45 @@
             btnSave.style.cursor = 'not-allowed';
             document.getElementById('team-select').disabled = true;
         } else {
-            btnSave.disabled = false;
-            btnSave.style.background = '#00c853';
-            btnSave.style.cursor = 'pointer';
-            document.getElementById('team-select').disabled = false;
+            // Verificar si el primer partido de la jornada ya empezó
+            var eventos = await fetchJornada(jornadaSiguiente);
+            if (eventos.length > 0) {
+                // Ordenar por fecha y obtener el primer partido
+                eventos.sort(function(a, b) {
+                    return new Date(a.strTimestamp) - new Date(b.strTimestamp);
+                });
+                var primerPartido = eventos[0];
+                // Convertir timestamp UTC a hora México (GMT-6)
+                var fechaPrimerPartidoUTC = new Date(primerPartido.strTimestamp);
+                var fechaPrimerPartidoMexico = new Date(fechaPrimerPartidoUTC.getTime() - 6 * 60 * 60 * 1000);
+                // Convertir hora local del usuario a hora México
+                var ahoraUTC = new Date();
+                var ahoraMexico = new Date(ahoraUTC.getTime() + (ahoraUTC.getTimezoneOffset() * 60 * 1000) - 6 * 60 * 60 * 1000);
+
+                // Si el primer partido ya empezó (en hora México), bloquear selección
+                if (ahoraMexico >= fechaPrimerPartidoMexico) {
+                    fb.innerText = 'Los partidos de la Jornada ' + jornadaSiguiente + ' ya comenzaron. No puedes seleccionar equipos.';
+                    fb.style.color = '#ff5252';
+                    fb.style.fontWeight = 'bold';
+                    btnSave.disabled = true;
+                    btnSave.style.background = '#555';
+                    btnSave.style.cursor = 'not-allowed';
+                    btnSave.innerText = 'JORNADA EN CURSO - CERRADO';
+                    document.getElementById('team-select').disabled = true;
+                    document.getElementById('team-select').style.background = '#333';
+                    document.getElementById('team-select').innerHTML = '<option value="">JORNADA EN CURSO</option>';
+                } else {
+                    btnSave.disabled = false;
+                    btnSave.style.background = '#00c853';
+                    btnSave.style.cursor = 'pointer';
+                    document.getElementById('team-select').disabled = false;
+                }
+            } else {
+                btnSave.disabled = false;
+                btnSave.style.background = '#00c853';
+                btnSave.style.cursor = 'pointer';
+                document.getElementById('team-select').disabled = false;
+            }
         }
         
         // Cargar equipos pendientes aquí también
@@ -417,6 +462,26 @@
         if (!perfilFinal || perfilFinal.vidas <= 0 || perfilFinal.eliminado) {
             alert("¡HAS SIDO ELIMINADO! Ya no puedes seleccionar equipos.");
             return;
+        }
+
+        // Verificar si el primer partido de la jornada ya empezó (doble seguridad)
+        var eventos = await fetchJornada(jornadaSiguiente);
+        if (eventos.length > 0) {
+            eventos.sort(function(a, b) {
+                return new Date(a.strTimestamp) - new Date(b.strTimestamp);
+            });
+            var primerPartido = eventos[0];
+            // Convertir timestamp UTC a hora México (GMT-6)
+            var fechaPrimerPartidoUTC = new Date(primerPartido.strTimestamp);
+            var fechaPrimerPartidoMexico = new Date(fechaPrimerPartidoUTC.getTime() - 6 * 60 * 60 * 1000);
+            // Convertir hora local del usuario a hora México
+            var ahoraUTC = new Date();
+            var ahoraMexico = new Date(ahoraUTC.getTime() + (ahoraUTC.getTimezoneOffset() * 60 * 1000) - 6 * 60 * 60 * 1000);
+
+            if (ahoraMexico >= fechaPrimerPartidoMexico) {
+                alert("Los partidos de la Jornada " + jornadaSiguiente + " ya comenzaron. No puedes seleccionar equipos.");
+                return;
+            }
         }
 
         // Verificar si ya usó este equipo en una jornada anterior
@@ -599,17 +664,17 @@
                  + '</tr></thead><tbody>';
 
         eventos.forEach(function(p) {
-            // strTimestamp viene en UTC, México siempre es GMT-6 (no cambia horario)
-            var fechaUTC = new Date(p.strTimestamp + 'Z');
-            var fechaGMT6 = new Date(fechaUTC.getTime() - 6 * 60 * 60 * 1000);
+            // strTimestamp viene en UTC de TheSportsDB, convertir a hora México (GMT-6)
+            var fechaUTC = new Date(p.strTimestamp);
+            var fechaMexico = new Date(fechaUTC.getTime() - 6 * 60 * 60 * 1000);
 
             var dias  = ['dom','lun','mar','mié','jue','vie','sáb'];
             var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-            var dia    = dias[fechaGMT6.getUTCDay()];
-            var numDia = fechaGMT6.getUTCDate();
-            var mes    = meses[fechaGMT6.getUTCMonth()];
-            var hh     = String(fechaGMT6.getUTCHours()).padStart(2,'0');
-            var mm     = String(fechaGMT6.getUTCMinutes()).padStart(2,'0');
+            var dia    = dias[fechaMexico.getDay()];
+            var numDia = fechaMexico.getDate();
+            var mes    = meses[fechaMexico.getMonth()];
+            var hh     = String(fechaMexico.getHours()).padStart(2,'0');
+            var mm     = String(fechaMexico.getMinutes()).padStart(2,'0');
             var hora   = hh + ':' + mm;
             var fecha  = dia + ' ' + numDia + ' ' + mes + ', ' + hora;
 
@@ -664,6 +729,17 @@
             document.getElementById('admin-section').style.display = 'block';
             document.getElementById('reset-torneo-section').style.display = 'block';
             cargarUsuariosAdmin();
+            cargarJornadasVerificador();
+        }
+    }
+
+    async function cargarJornadasVerificador() {
+        var select = document.getElementById('verificar-jornada-select');
+        select.innerHTML = '<option value="">Automático (jornada más reciente)</option>';
+
+        // Cargar jornadas 1-17
+        for (var i = 1; i <= 17; i++) {
+            select.innerHTML += '<option value="' + i + '">Jornada ' + i + '</option>';
         }
     }
 
@@ -766,6 +842,8 @@
     async function correrVerificador() {
         var btn = document.getElementById('btn-verificar');
         var fb  = document.getElementById('admin-feedback');
+        var jornadaSelect = document.getElementById('verificar-jornada-select');
+        var jornadaEspecifica = jornadaSelect.value;
 
         btn.disabled = true;
         btn.innerText = 'Ejecutando...';
@@ -773,7 +851,15 @@
         fb.style.color = '#aaa';
 
         try {
-            var response = await fetch(RENDER_URL_VERIFICADOR, { method: 'POST' });
+            var url = RENDER_URL_VERIFICADOR;
+            var body = {};
+
+            // Si se seleccionó una jornada específica, enviarla al backend
+            if (jornadaEspecifica) {
+                url = RENDER_URL_VERIFICADOR + '?jornada=' + jornadaEspecifica;
+            }
+
+            var response = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
             var data = await response.json();
 
             if (data.success) {

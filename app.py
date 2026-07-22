@@ -438,8 +438,15 @@ def verificar_jornada():
     """Endpoint para correr el verificador manualmente desde el panel admin"""
     try:
         import subprocess
+        jornada_especifica = request.args.get('jornada')
+
+        cmd = ['python', 'verificador.py']
+        if jornada_especifica:
+            cmd.append('--jornada')
+            cmd.append(jornada_especifica)
+
         resultado = subprocess.run(
-            ['python', 'verificador.py'],
+            cmd,
             capture_output=True, text=True, timeout=60
         )
         if resultado.returncode == 0:
