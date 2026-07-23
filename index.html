@@ -153,6 +153,7 @@
 
             if (error) {
                 // Si falla el login, intentamos registro con backend (reintentos y mensaje amigable)
+                btn.innerText = "Registrando...";
                 const registerResp = await fetch(RENDER_URL + '/api/auth/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -165,13 +166,20 @@
                     return;
                 }
 
-                alert("Cuenta creada. Presiona Entrar de nuevo.");
-                return;
+                // Auto-login: evita el segundo clic manual
+                btn.innerText = "Iniciando sesión...";
+                const { data: loginData, error: loginError } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (loginError) {
+                    alert("Cuenta creada. Inicia sesión con tu correo y contraseña.");
+                    return;
+                }
+                userActual = loginData.user;
             } else {
                 userActual = data.user;
             }
 
-            iniciarJuego();
+            btn.innerText = "Cargando juego...";
+            await iniciarJuego();
 
         } catch (e) {
             alert("Error: " + e.message);
@@ -194,22 +202,19 @@
         document.getElementById('game-section').style.display = 'block';
         document.getElementById('user-display').innerText = userActual.email;
 
-        // Crear perfil si no existe
-        const { data: perfilExiste } = await supabaseClient
-            .from('perfiles').select('id').eq('id', userActual.id).single();
+        // Obtener o crear perfil (1-2 consultas en lugar de 3)
+        let { data: perfil } = await supabaseClient
+            .from('perfiles').select('vidas, eliminado').eq('id', userActual.id).maybeSingle();
 
-        if (!perfilExiste) {
-            await supabaseClient.from('perfiles').insert([{
+        if (!perfil) {
+            const { data: nuevoPerfil } = await supabaseClient.from('perfiles').insert([{
                 id: userActual.id,
                 username: userActual.email,
                 vidas: 3,
                 eliminado: false
-            }]);
+            }]).select('vidas, eliminado').single();
+            perfil = nuevoPerfil;
         }
-
-        // Cargar vidas y verificar estado del jugador
-        const { data: perfil } = await supabaseClient
-            .from('perfiles').select('vidas, eliminado').eq('id', userActual.id).single();
         
         if (perfil) {
             document.getElementById('vidas-count').innerText = perfil.vidas;
@@ -249,15 +254,13 @@
         const select = document.getElementById('team-select');
         select.innerHTML = equipos.map(e => "<option value='" + e.id + "'>" + e.nombre + "</option>").join('');
 
-        cargarTablaGlobal();
-        cargarCalendario();
-        detectarJornadaSiguiente();
+        await Promise.all([
+            cargarTablaGlobal(),
+            cargarCalendario(),
+            detectarJornadaSiguiente(),
+            cargarEquiposPendientes()
+        ]);
         mostrarAdminSiAplica();
-        
-        // Cargar equipos pendientes después de que todo esté inicializado
-        setTimeout(() => {
-            cargarEquiposPendientes();
-        }, 1000);
     }
 
     // EQUIPOS PENDIENTES

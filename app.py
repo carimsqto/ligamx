@@ -135,6 +135,16 @@ def register_user():
 
                 user = getattr(result, "user", None)
                 if user:
+                    try:
+                        supabase_admin.table('perfiles').insert({
+                            "id": user.id,
+                            "username": email,
+                            "vidas": 3,
+                            "eliminado": False
+                        }).execute()
+                    except Exception:
+                        pass  # perfil ya existe; no bloquea el registro
+
                     return jsonify({
                         "success": True,
                         "message": "Cuenta creada correctamente",
